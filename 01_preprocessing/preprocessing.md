@@ -4,6 +4,25 @@ The steps I used to go from raw fastqs to bams to be used in variant calling. I 
 
 Notes: I start all my scripts in a directory for the project that I use as the first command line argument.
 
+Basic directory structure
+
+```
+cawa-breeding-lcwg  
+-->number-units.txt
+-->sample.txt
+-->fastqs
+---->a.fastq.R1.fq.gz
+---->a.fastq.R2.fq.gz
+-->results
+---->bams
+------>a.merged.mkDup.bam
+---->qc
+---->slurm-logs
+---->trim
+------>a.fastq.R1.trimmed.fq.gz
+------>a.fastq.R2.trimmed.fq.gz
+```
+
 Workflow
 1. Trimming adaptors and qc: 
 2. Mapping and marking dups:
