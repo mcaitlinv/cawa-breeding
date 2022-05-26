@@ -1,8 +1,8 @@
-#cawa-breeding
+# cawa-breeding
 
 Code and workflow for bioinformatic processing and analysis done to find conservation units in the Canada Warbler (*Cardellina canadensis*).
 
-##Overview of workflow:
+### Overview of workflow:
 
 1. Preprocessing
 2. Calling variants
