@@ -14,9 +14,9 @@ Workflow
 
 This dataset was generated with both HiSeq and NovaSeq platforms. NovaSeq platforms are 2-color chemistry and can have poly-G tails due to poor quality sequence that gets called as G, see [this discussion](https://sequencing.qcfail.com/articles/illumina-2-colour-chemistry-can-overcall-high-confidence-g-bases/).
 
-To check read quality I used FASTQC before any processing. Then, I trimmed adaptors using TrimGalore. TrimGalore has a library of adaptors built in, so adaptors are not specified. After trimming I used a sliding window cut using Fastp.The sliding window trimmed the 3' end of the read after 4 bases in a row were below a mean quality of 20. This is to remove any potentially poor-quality bases at the end of the read, as in NovaSeq bams these may get called as G's with high confidence.
+  1a)To check read quality I used FASTQC before any processing. Then, I trimmed adaptors using TrimGalore. TrimGalore has a library of adaptors built in, so adaptors are not specified. After trimming I used a sliding window cut using Fastp.The sliding window trimmed the 3' end of the read after 4 bases in a row were below a mean quality of 20. This is to remove any potentially poor-quality bases at the end of the read, as in NovaSeq bams these may get called as G's with high confidence.
 
-After doing individual quality control, I check the entire dataset together using MULTIQC. This is assigned to a separate step as I needed all samples completed to run MULTIQC and it only works through conda when installed by itself.
+  1b)After doing individual quality control, I check the entire dataset together using MULTIQC. This is assigned to a separate step as I needed all samples completed to run MULTIQC and it only works through conda when installed by itself.
 
 Notes: I use a [script]() to assign sample ID, plate, flowcell ID, lane ID, and an index number from a reference file called [numbered-units.txt](). This is used to connect the generally pretty dense fastq names to the sample ID and let me assign each pair of fastqs to their own job in a slurm array.
 
@@ -210,3 +210,4 @@ mkdir -p results/qc/multiqc
 
 multiqc -f -v -o results/qc/multiqc results/qc/fqFASTQC results/qc/trimFASTQC
 ```
+
