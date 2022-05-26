@@ -90,7 +90,7 @@ zlib                      1.2.11               h7f8727e_4
 ```
 Trimming, cutting, and individual qc:
 
-```{bash, eval=F}
+```bash
 source ~/.bashrc
 ##This links sample ID, plate, and lane ID to the relevant fastq
 ##It also submits each line as a single job of an array
@@ -218,7 +218,7 @@ zlib                      1.2.11               h7f8727e_4
 ```
 Multi-sample qc:
 
-```{bash}
+```bash
 source ~/.bashrc
 cd $1
 
@@ -234,7 +234,7 @@ multiqc -f -v -o results/qc/multiqc results/qc/fqFASTQC results/qc/trimFASTQC
 
 Canada Warbler reference genome can be found here. Before starting to map to the reference I indexed the genome. Note: the genome lives in a separate directory from where I run the analysis.
 
-```{bash}
+```bash
 bwa index  /projects/caitlinv@colostate.edu/genomes/cardellina_canadensis_pseudohap_v1.fasta
 ```
 
@@ -306,7 +306,7 @@ zstd                      1.4.9                haebb681_0
 
 Mapping and marking duplicates
 
-```{bash}
+```bash
 source ~/.bashrc
 eval $(line_assign.sh $SLURM_ARRAY_TASK_ID numbered-units.txt)
 
@@ -350,7 +350,7 @@ samtools index results/bams/"$ID".mkdup.bam
 
 Merging samples and marking duplicates again.
 
-```{bash}
+```bash
 eval $(line_assign.sh $SLURM_ARRAY_TASK_ID samples.txt)
 source ~/.bashrc
 
