@@ -1,29 +1,82 @@
 # Pre-processing
 
-The steps I used to go from raw fastqs to bams to be used in variant calling.
+The steps I used to go from raw fastqs to bams to be used in variant calling. I primarily used [Conda/Mamba](https://docs.conda.io/en/latest/) install and use software. Conda environments and loaded packages are listed with the overall commands.
 
 Workflow
-1. Trimming adaptors and remove low quality tails:
+1. Trimming adaptors and remove low quality tails: 
 2. Mapping to reference:
 3. Marking duplicates:
 4. Merging samples with multiple bams and marking duplicates again:
 
 ## 1) Trimming adaptors and remove low quality tails
 
-This dataset was generated with both HiSeq and NovaSeq platforms. NovaSeq platforms are 2-color chemistry and can have poly-G tails due to poor quality sequence that gets called as G, see [this discussion](https://sequencing.qcfail.com/articles/illumina-2-colour-chemistry-can-overcall-high-confidence-g-bases/). 
+This dataset was generated with both HiSeq and NovaSeq platforms. NovaSeq platforms are 2-color chemistry and can have poly-G tails due to poor quality sequence that gets called as G, see [this discussion](https://sequencing.qcfail.com/articles/illumina-2-colour-chemistry-can-overcall-high-confidence-g-bases/).
 
-In addition, I found that despite the sequencing centers processing to cut adaptors, I still had adaptor content. So I trimmed adaptors and used a sliding window cut on the 3' end of the read. The sliding window trimmed bases after 4 bases in a row were below 20.
+To check read quality I used FASTQC before any processing. Then, I trimmed adaptors using TrimGalore. TrimGalore has a library of adaptors built in, so adaptors are not specified. After trimming I used a sliding window cut using Fastp.The sliding window trimmed the 3' end of the read after 4 bases in a row were below a mean quality of 20. This is to remove any potentially poor-quality bases at the end of the read, as in NovaSeq bams these may get called as G's with high confidence.
 
-Code overview
+Note, I use a [script]() to assign sample ID, plate, flowcell ID, lane ID, and an index number from a reference file called [numbered-units.txt](). This is used to connect the generally pretty dense fastq names to the sample ID and let me assign each pair of fastqs to their own job in a slurm array.
+
+Conda environment and package versions:
 ```
-module purge
+conda list -n trimQC
+
+# packages in environment at /projects/caitlinv@colostate.edu/software/anaconda/envs/trimQC:
+#
+# Name                    Version                   Build  Channel
+_libgcc_mutex             0.1                        main
+_openmp_mutex             4.5                       1_gnu
+bz2file                   0.98             py37h06a4308_1
+ca-certificates           2022.2.1             h06a4308_0
+certifi                   2021.10.8        py37h06a4308_2
+cutadapt                  1.18             py37h14c3975_1    bioconda
+dbus                      1.13.18              hb2f20db_0
+expat                     2.4.4                h295c915_0
+fastqc                    0.11.9               hdfd78af_1    bioconda
+font-ttf-dejavu-sans-mono 2.37                 hd3eb1b0_0
+fontconfig                2.13.1               h6c09931_0
+freetype                  2.11.0               h70c0345_0
+glib                      2.69.1               h4ff587b_1
+icu                       58.2                 he6710b0_3
+ld_impl_linux-64          2.35.1               h7274673_9
+libffi                    3.3                  he6710b0_2
+libgcc-ng                 9.3.0               h5101ec6_17
+libgomp                   9.3.0               h5101ec6_17
+libpng                    1.6.37               hbc83047_0
+libstdcxx-ng              9.3.0               hd4cf53a_17
+libuuid                   1.0.3                h7f8727e_2
+libxcb                    1.14                 h7b6447c_0
+libxml2                   2.9.12               h03d6c58_0
+ncurses                   6.3                  h7f8727e_2
+openjdk                   11.0.13              h87a67e3_0
+openssl                   1.1.1m               h7f8727e_0
+pcre                      8.45                 h295c915_0
+perl                      5.26.2               h14c3975_0
+pigz                      2.6                  h27cfd23_0
+pip                       21.2.2           py37h06a4308_0
+python                    3.7.11               h12debd9_0
+readline                  8.1.2                h7f8727e_1
+setuptools                58.0.4           py37h06a4308_0
+sqlite                    3.38.0               hc218d9a_0
+tk                        8.6.11               h1ccaba5_0
+trim-galore               0.6.7                hdfd78af_0    bioconda
+wheel                     0.37.1             pyhd3eb1b0_0
+xopen                     0.7.3                      py_0    bioconda
+xz                        5.2.5                h7b6447c_0
+zlib                      1.2.11               h7f8727e_4
+```
+Trimming and cutting overview:
+
+```{bash, eval=F}
 source ~/.bashrc
+##This links sample ID, plate, and lane ID to the relevant fastq
+##It also submits each line as a single job of an array
 eval $(line_assign.sh $SLURM_ARRAY_TASK_ID numbered-units.txt)
 cd $1
 
 ##Activate conda
 conda activate trimQC
 
+##Set up directories to hold output
 mkdir -p results/slurm_logs/trim/
 mkdir -p results/trim/
 mkdir -p results/qc/fqFASTQC
@@ -36,13 +89,11 @@ T2=`basename $fq2 .fq.gz`_val_2.fq.gz
 O1=`basename $T1 _val_1.fq.gz`.trim.fq.gz
 O2=`basename $T2 _val_2.fq.gz`.trim.fq.gz
 
+##Initial QC step
 fastqc -o results/qc/fqFASTQC --noextract fastqs/$fq1 fastqs/$fq2 > results/logs/qc/fqFASTQC/fastqc."$fq1".log 2>&1
-
-
 
 ###Trim low quality fragments and adapters
 trim_galore -q 5 --paired --cores 8 --output_dir results/trim fastqs/$fq1 fastqs/$fq2
-
 
 ##Fastp for trimming the poly-g tails
 /projects/caitlinv@colostate.edu/software/fastp --in1  results/trim/$T1 --out1 results/trim/$O1 \
