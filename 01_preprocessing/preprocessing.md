@@ -26,6 +26,7 @@ cawa-breeding-lcwg
 Workflow
 1. Trimming adaptors and qc: 
 2. Mapping and marking dups:
+3. Checking sample coverage:
 
 Each step of the workflow has 2 associated scripts, eg scripts 1a/1b are in the first step.
 
@@ -394,3 +395,15 @@ samtools index  results/bams/"$sample".mergeMkDup.bam
 rm  results/bams/"$sample".fixm.sort.bam
 fi
 ```
+
+## 3) Getting coverage for each sample
+
+After getting the merged bams for each sample, I checked how coverage looked for each of the samples. Ideal target was >2X average. 
+
+- I start by getting the coverage at all positions covered for a sample by using `bedtools`. I used an array where each segment was a sample.   
+
+- Then I used a script that averages coverage across a sample and pastes it into a text file. 
+
+Note that the individual coverage files get pretty big pretty fast, so an alternate strategy would be to calculate per-position coverage, get the average and then delete the individual coverage file in a loop, so one sample is calculated at a time. I did not do that because the trade-off is it takes forever. 
+
+  
