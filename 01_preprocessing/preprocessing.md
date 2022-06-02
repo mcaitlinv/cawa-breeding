@@ -222,4 +222,29 @@ After getting the merged bams for each sample, I checked how coverage looked for
 
 Note that the individual coverage files get pretty big pretty fast, so an alternate strategy would be to calculate per-position coverage, get the average and then delete the individual coverage file in a loop, so one sample is calculated at a time. I did not do that because the trade-off is it takes forever. 
 
-  
+Get individual coverage at each bp:
+
+```bash
+eval $(line_assign.sh $SLURM_ARRAY_TASK_ID samples.txt)
+source ~/.bashrc
+cd $1
+
+##Activate conda
+conda activate bedtools
+
+bedtools genomecov -d -ibam results/bams/"$sample".mergeMkDup.bam  > results/cov/"$sample".genomecov.txt
+```
+Get average coverage for all individuals:
+
+```bash
+source ~/.bashrc
+cd $1
+
+touch results/cov/covSummary.txt
+
+for sample in `ls results/cov/*.genomecov.txt`
+  	do
+        awk '{if($3<500) {total+=$3; ++lines}} END {print FILENAME," ",total/lines}' \
+        $sample >> results/cov/covSummary.txt
+done
+```

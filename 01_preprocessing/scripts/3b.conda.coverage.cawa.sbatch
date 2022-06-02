@@ -35,7 +35,7 @@ cd $1
 
 touch results/cov/covSummary.txt
 
-for sample in `ls *.genomecov.txt`
+for sample in `ls results/cov/*.genomecov.txt`
   	do
         awk '{if($3<500) {total+=$3; ++lines}} END {print FILENAME," ",total/lines}' \
         $sample >> results/cov/covSummary.txt
