@@ -7,6 +7,9 @@ fastqc  0.11.9
 trim-galore 0.6.7
 fastp 0.22.0
 multiqc 1.0.dev0  
+bwa 0.7.17
+picard  2.26.11
+samtools  1.11
 ```
 
 The steps I used to go from raw fastqs to bams to be used in variant calling. I primarily used [Conda/Mamba](https://docs.conda.io/en/latest/) install and use software. Conda environments and loaded packages are listed with the overall commands.
@@ -115,67 +118,8 @@ bwa index  /projects/caitlinv@colostate.edu/genomes/cardellina_canadensis_pseudo
 
   - After getting bams that have duplicates marked for each fastq pair, I merge the fastqs by samples. In the previous step I added read groups where `-RGSM` was a sample ID that corresponded to a single individual so I can merge multiple bams into a single sample bam. Some of my samples only have one bam, so I added a simple if/else statement to take care of that. Note: This step substitutes [samples.txt]() for [numnbered-units.txt]() when assigning jobs in the array because now I only want a single job for each sample, instead of a job for each pair of fastqs.
 
-Conda environment
 
-```
-conda list -n bwasam
-# packages in environment at /projects/caitlinv@colostate.edu/software/anaconda/envs/bwasam:
-#
-# Name                    Version                   Build  Channel
-_libgcc_mutex             0.1                        main
-_openmp_mutex             4.5                       1_gnu
-_r-mutex                  1.0.0               anacondar_1
-bwa                       0.7.17               h5bf99c6_8    bioconda
-bzip2                     1.0.8                h7b6447c_0
-c-ares                    1.18.1               h7f8727e_0
-ca-certificates           2022.2.1             h06a4308_0
-cairo                     1.16.0               hf32fb01_1
-dbus                      1.13.18              hb2f20db_0
-expat                     2.4.4                h295c915_0
-fontconfig                2.13.1               h6c09931_0
-freetype                  2.11.0               h70c0345_0
-fribidi                   1.0.10               h7b6447c_0
-glib                      2.69.1               h4ff587b_1
-graphite2                 1.3.14               h23475e2_0
-harfbuzz                  2.8.1                h6f93f22_0
-htslib                    1.11                 hd3b49d5_2    bioconda
-icu                       58.2                 he6710b0_3
-jpeg                      9d                   h7f8727e_0
-krb5                      1.19.2               hac12032_0
-libcurl                   7.80.0               h0b77cf5_0
-libdeflate                1.7                  h27cfd23_5
-libedit                   3.1.20210714         h7f8727e_0
-libev                     4.33                 h7f8727e_1
-libffi                    3.3                  he6710b0_2
-libgcc                    7.2.0                h69d50b8_2
-libgcc-ng                 9.3.0               h5101ec6_17
-libgomp                   9.3.0               h5101ec6_17
-libnghttp2                1.46.0               hce63b2e_0
-libpng                    1.6.37               hbc83047_0
-libssh2                   1.9.0                h1ba5d50_1
-libstdcxx-ng              9.3.0               hd4cf53a_17
-libtiff                   4.2.0                h85742a9_0
-libuuid                   1.0.3                h7f8727e_2
-libwebp-base              1.2.2                h7f8727e_0
-libxcb                    1.14                 h7b6447c_0
-libxml2                   2.9.12               h03d6c58_0
-lz4-c                     1.9.3                h295c915_1
-ncurses                   6.2                  he6710b0_1
-openjdk                   11.0.13              h87a67e3_0
-openssl                   1.1.1m               h7f8727e_0
-pango                     1.45.3               hd140c19_0
-pcre                      8.45                 h295c915_0
-perl                      5.26.2               h14c3975_0
-picard                    2.26.11              hdfd78af_0    bioconda
-pixman                    0.40.0               h7f8727e_1
-r-base                    3.2.2                         0
-readline                  8.1                  h27cfd23_0
-samtools                  1.11                 h6270b1f_0    bioconda
-tk                        8.6.11               h1ccaba5_0
-xz                        5.2.5                h7b6447c_0
-zlib                      1.2.11               h7f8727e_4
-zstd                      1.4.9                haebb681_0
-```
+
 
 Mapping and marking duplicates
 
