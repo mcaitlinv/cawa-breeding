@@ -38,6 +38,60 @@ scaffold29546:1000001-2000000
   - To get snps I first used `bcftools mpileup` to get genotype likelihoods, then the `bcftools call` function to produce a file with called snps.
   
   -Then I used `GATK HaplotypeCaller` to get a file of called snps. 
+  
+Mpileup variant calling:
+
+``` bash
+
+source ~/.bashrc
+conda activate bcftools
+cd $1
+
+##Get interval file name
+intervals=$(awk -v N=$SLURM_ARRAY_TASK_ID 'NR == N {print $1}' intervals2mb.txt)
+##Get interval set number
+intervalID=$(echo ${intervals} | cut -f2 -d_ | cut -f1 -d.)
+
+##set out name
+mkdir -p results/variants/mpileup
+outname=$(printf 'results/variants/mpileup/cawa2mb.interval.%s.samtools.bcf'  $intervalID)
+
+##Get list of bams
+ls results/bams/*mergeMkDup.bam > cawa.all.bam.list
+bamlist=cawa.all.bam.list
+reference="/projects/caitlinv@colostate.edu/genomes/cardellina_canadensis_pseudohap_v1.fasta"
+
+bcftools mpileup -Ou -f $reference -R ${intervals} --annotate FORMAT/AD,FORMAT/DP -b ${bamlist} | bcftools call -mv -Ob -o ${outname}
+```
+
+GATK variant calling:
+
+``` bash
+
+source ~/.bashrc
+conda activate gatk4.2.5.0
+cd $1
+
+##Get interval file name
+intervals=$(awk -v N=$SLURM_ARRAY_TASK_ID 'NR == N {print $1}' intervals2mb.list)
+##Get interval set number
+intervalID=$(echo "$intervals" | cut -f2 -d_ | cut -f1 -d.)
+
+##get bam directory
+bamDir="/scratch/summit/caitlinv@colostate.edu/cawa-breed-wglc/results/bams"
+reference="/projects/caitlinv@colostate.edu/genomes/cardellina_canadensis_pseudohap_v1.fasta"
+
+##assign outname
+mkdir -p results/variants/gatk
+outname=$(printf 'results/variants/gatk/cawa2mb.interval.%s.vcf.gz'  $intervalID)
+
+gatk --java-options "-Xmx30g -XX:+UseParallelGC -XX:ParallelGCThreads=8" HaplotypeCaller \
+-R $reference \
+$(printf ' -I %s ' $bamDir/*mergeMkDup.bam) \
+-L $intervals \
+-O ${outname}
+```
+
 
 
 
