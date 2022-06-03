@@ -3,14 +3,14 @@
 These steps go from pre-processed bams through variant calling and filtering to get the dataset of SNPs to analyze. 
 
 Workflow
-4. Initial variant calling with GATK and mpileup: 
-5. Merge/filter and intersect variant sets:
-6. Base quality score recalibration:
-7. Final variant calling:
+1. Initial variant calling with GATK and mpileup: 
+2. Merge/filter and intersect variant sets:
+3. Base quality score recalibration:
+4. Final variant calling:
 
 Each step of the workflow has 2 associated scripts, eg scripts 4a/4b are in the first step.
 
-## 4) Initial variant calling with GATK and mpileup
+## 1) Initial variant calling with GATK and mpileup
 
 To get a list of 'known' variants to perform BQSR with, I used GATK and mpileup to call SNPs with the pre-processed bams. Both of these steps can take a loooong time if you try to use the full scaffold set at once. Instead, I split my scaffolds into regions of ~2Mb each and called variants for each 2Mb region. To get the 2Mb regions, I used the script `get.2MB.scaffolds.sbatch`, which uses the bam header to calculate scaffold size, then splits scaffolds that are larger than 1Mb into ~1Mb chunks, then adds scaffolds together until it reaches ~2Mb. This results in both lots of scaffolds that are tiny in a file and some files with just 2 1Mb chunks of a single scaffold. For example:
 
@@ -92,7 +92,7 @@ $(printf ' -I %s ' $bamDir/*mergeMkDup.bam) \
 -O ${outname}
 ```
 
-## 5) Merge and filter/intersect variant sets:
+## 2) Merge and filter/intersect variant sets:
 
 Once I have my initial vcfs generated with `bcftools` and `GATK`, I merge the scaffolds together into a single vcf then filter and intersect the variants called with samtools and GATK. This is to produce a 'high quality' variant set per the BQSR best practices for non-model references, see ['No excuses'](https://gatk.broadinstitute.org/hc/en-us/articles/360035890531-Base-Quality-Score-Recalibration-BQSR-). I do with with slightly more stringent filters than I would normally since the goal is to have the best possible variant set for BQSR.
 
