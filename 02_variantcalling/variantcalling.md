@@ -12,7 +12,7 @@ Each step of the workflow has 2 associated scripts, eg scripts 4a/4b are in the 
 
 ## 4) Initial variant calling with GATK and mpileup
 
-To get a list of 'known' variants to perform BQSR with, I used GATK and mpileup to call SNPs with the pre-processed bams. Both of these steps can take a loooong time if you try to use the full scaffold set at once. Instead, I split my scaffolds into regions of ~2Mb each and called variants for each 2Mb region. To get the 2Mb regions, I used the script `get.2MB.scaffolds.sbath`, which uses the bam header to calculate scaffold size, then splits scaffolds that are larger than 1Mb into ~1Mb chunks, then adds scaffolds together until it reaches ~2Mb. This results in both lots of scaffolds that are tiny in a file and some files with just 2 1Mb chunks of a single scaffold. For example:
+To get a list of 'known' variants to perform BQSR with, I used GATK and mpileup to call SNPs with the pre-processed bams. Both of these steps can take a loooong time if you try to use the full scaffold set at once. Instead, I split my scaffolds into regions of ~2Mb each and called variants for each 2Mb region. To get the 2Mb regions, I used the script `get.2MB.scaffolds.sbatch`, which uses the bam header to calculate scaffold size, then splits scaffolds that are larger than 1Mb into ~1Mb chunks, then adds scaffolds together until it reaches ~2Mb. This results in both lots of scaffolds that are tiny in a file and some files with just 2 1Mb chunks of a single scaffold. For example:
 
 ``` 
 cat intervals/interval2mb_003.list
@@ -37,7 +37,7 @@ scaffold29546:1000001-2000000
   
   - To get snps I first used `bcftools mpileup` to get genotype likelihoods, then the `bcftools call` function to produce a file with called snps.
   
-  -Then I used `GATK HaplotypeCaller` to get a file of called snps. 
+  - Then I used `GATK HaplotypeCaller` to get a file of called snps. 
   
 Mpileup variant calling:
 
@@ -92,6 +92,83 @@ $(printf ' -I %s ' $bamDir/*mergeMkDup.bam) \
 -O ${outname}
 ```
 
+## 5) Merge and filter/intersect variant sets:
 
+Once I have my initial vcfs generated with `bcftools` and `GATK`, I merge the scaffolds together into a single vcf then filter and intersect the variants called with samtools and GATK. This is to produce a 'high quality' variant set per the BQSR best practices for non-model references, see ['No excuses'](https://gatk.broadinstitute.org/hc/en-us/articles/360035890531-Base-Quality-Score-Recalibration-BQSR-). I do with with slightly more stringent filters than I would normally since the goal is to have the best possible variant set for BQSR.
+
+  - To merge the scaffold vcfs into a single vcf, I use `bcftools index` to index, then use `bcftools concat` to get the vcfs into a single vcf. Note that I used the -a option in `bcftools concat` to allow positionsto be out of order when concatenation. They shouldn't be due to how I split my scaffolds, but just in case I allow them to be out of order and then use `bcftools sort` to sort the final vcf.
+  
+  - Then I used `bcftools view` to hard filter each set of variants. I kept only biallelic sites and set a minor allele frequncy of less than 5%. I used a missing filter of less than 5% and a quality score of above 50. This is a bit more stringent than I would normally filter to get the highest confidence variants. I then used `bcftools isec` to get the intersection of the filtered sets of SNPs. This is then used for the 'known variant set' for BQSR.
+  
+Merging vcfs:
+
+``` bash 
+source ~/.bashrc
+cd $1
+
+conda activate bcftools
+
+##Make temp dir, bcftools was not finding default tmp
+mkdir -p tmp
+
+# list file with the 535 2mb intervals
+vcfs=intervals2mb.vcfs.list
+bcfs=intervals2mb.bcfs.list
+
+##out names for merged files
+outname=cawa.unfiltered
+
+##index bcfs
+while read a; do bcftools index $a; done < intervals2mb.bcfs.list
+##bcftools concat for bcfs
+bcftools concat -a  --threads 8 -f ${bcfs} -Oz -o results/variants/"$outname".bcf.gz
+bcftools sort -m 30G -T tmp -Oz -o results/variants/"$outname".sort.bcf.gz  results/variants/"$outname".bcf.gz
+
+##No need to index, gatk already made it
+##bcftools concat for bcfs
+bcftools concat -a  --threads 8 -f ${vcfs} -Oz -o results/variants/"$outname".vcf.gz
+bcftools sort -m 30G -T tmp -Oz -o results/variants/"$outname".sort.vcf.gz  results/variants/"$outname".vcf.gz
+```
+Filtering and intersecting vcfs:
+
+``` bash 
+source ~/.bashrc
+cd $1
+
+conda activate bcftools
+
+##Make temp dir, bcftools was not finding default tmp
+mkdir -p tmp
+
+##the 2 vcfs to filter then intersect
+vcf=temp.sort.vcf.gz
+bcf=temp.sort.bcf.gz
+##out directory
+outDir="results/variants"
+
+##index the vcfs 
+bcftools index $outDir/$vcf
+bcftools index $outDir/$bcf
+##Get unfiltered stats
+bcftools stats $outDir/$vcf > $outDir/$vcf.stats
+bcftools stats $outDir/$bcf > $outDir/$bcf.stats
+
+##filter vcfs
+outname=cawa.snps.miss0.1.qual30
+bcftools view --threads 8 -m 2 -M 2 --min-af 0.05 --max-af 0.95 -i 'F_MISSING < 0.1 && QUAL>30' -Oz -o $outDir/$outname.vcf.gz $outDir/$vcf
+bcftools view --threads 8 -m 2 -M 2 --min-af 0.05 --max-af 0.95 -i 'F_MISSING < 0.1 && QUAL>30' -Oz -o $outDir/$outname.bcf.gz $outDir/$bcf
+##index filtered
+bcftools index $outDir/"$outname".vcf.gz
+bcftools index $outDir/"$outname".bcf.gz
+##stats on filtered
+bcftools stats $outDir/"$outname".vcf.gz > $outDir/"$outname".vcf.stats
+bcftools stats $outDir/"$outname".bcf.gz > $outDir/"$outname".bcf.stats
+
+##intersect variant sets, get stats on intersection
+mkdir -p $outDir/isec
+bcftools isec $outDir/"$outname".vcf.gz $outDir/"$outname".bcf.gz -p $outDir/isec -Oz
+bcftools index $outDir/isec/*
+bcftools stats $outDir/isec/0002.vcf.gz > $outDir/isec/0002.vcf.stats
+```
 
 
