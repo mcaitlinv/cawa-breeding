@@ -59,6 +59,10 @@ Notes: I use a script [line_assign.sh]() to assign sample ID, plate, flowcell ID
 
 ## 2) Mapping and marking dups
 
+Scripts: 
+  1) [2a.conda.map.bwa.trim.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/01_preprocessing/scripts/2a.conda.map.bwa.trim.sbatch)
+  2) [2b.conda.merge.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/01_preprocessing/scripts/2b.conda.merge.sbatch)
+
 Canada Warbler reference genome can be found here. Before starting to map to the reference I indexed the genome. Note: the genome lives in a separate directory from where I run the analysis.
 
 ```bash
@@ -70,6 +74,11 @@ bwa index  /projects/caitlinv@colostate.edu/genomes/cardellina_canadensis_pseudo
   - After getting bams that have duplicates marked for each fastq pair, I merge the fastqs by samples. In the previous step I added read groups where `-RGSM` was a sample ID that corresponded to a single individual so I can merge multiple bams into a single sample bam. Some of my samples only have one bam, so I added a simple if/else statement to take care of that. Note: This step substitutes [samples.txt]() for [numnbered-units.txt]() when assigning jobs in the array because now I only want a single job for each sample, instead of a job for each pair of fastqs.
 
 ## 3) Getting coverage for each sample
+
+Scripts: 
+  1) [3a.conda.coverage.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/01_preprocessing/scripts/3a.conda.coverage.sbatch)
+  2) [3b.conda.coverage.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/01_preprocessing/scripts/3b.conda.coverage.sbatch)
+
 
 After getting the merged bams for each sample, I checked how coverage looked for each of the samples. Ideal target was >2X average. 
 
