@@ -83,6 +83,7 @@ Once I had the vcf files for all of the 2Mb regions, I merged them into a single
 
   -  To merge the scaffold vcfs into a single vcf, I used `bcftools index` to index, then use `bcftools concat` to get the vcfs into a single vcf. Note that I used the -a option in `bcftools concat` to allow positions to be out of order when concatenating. I used `bcftools sort` to sort the final vcf.
   
-  -  To get the final variant set, I used `bcftools view` to hard filter the vcf. I kept only bi-allelic sites and set a minor allele frequency of less than 5%. I used a missing filter of less than 20% and a quality score of above 30.
+  -  To get the final variant set, I used `bcftools view` to hard filter the vcf. I kept only bi-allelic sites and set a minor allele frequency of less than 5%. I disgarded samples with less than 1X coverage, dropping 12 samples to end with 169 total. I used a missing filter of less than 20% and a quality score of above 30.
 
+  - Additionally, I calculated allele depths on the filtered vcf file to use for exploratory analyses.
 
