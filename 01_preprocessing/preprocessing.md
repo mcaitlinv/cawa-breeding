@@ -37,13 +37,17 @@ cawa-breeding-lcwg
 ```
 
 Workflow
-1. [Trimming adaptors and qc](https://github.com/mcaitlinv/cawa-breeding/blob/main/01_preprocessing/preprocessing.md#1-trimming-adaptors-and-quality-control) 
-2. Mapping and marking dups:
-3. Checking sample coverage:
+1. Trimming adaptors and qc
+2. Mapping and marking dups
+3. Checking sample coverage
 
 Each step of the workflow has 2 associated scripts, eg scripts 1a/1b are in the first step.
 
 ## 1) Trimming adaptors and quality control
+
+Scripts: 
+  1) [1a.conda.trimgalore.fastqc.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/01_preprocessing/scripts/1a.conda.trimgalore.fastqc.sbatch)
+  2) [1b.conda.multiqc.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/01_preprocessing/scripts/1b.conda.multiqc.sbatch)
 
 This dataset was generated with both HiSeq and NovaSeq platforms. NovaSeq platforms are 2-color chemistry and can have poly-G tails due to poor quality sequence that gets called as G, see [this discussion](https://sequencing.qcfail.com/articles/illumina-2-colour-chemistry-can-overcall-high-confidence-g-bases/).
 
