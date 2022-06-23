@@ -1,29 +1,23 @@
 #!/bin/bash
-#set a job name
 #SBATCH --job-name=6a.bqsr
 #SBATCH --output=results/slurm_logs/bqsr/6a.bqsr.%j.out
 #SBATCH --error=results/slurm_logs/bqsr/6a.bqsr.%j.err
-################
-#SBATCH --time=12:00:00
+#SBATCH --time=02:00:00
 #SBATCH --qos=normal
 #SBATCH --partition=shas
 #SBATCH --array=1-181
-#################
-# Note: 4.84G/core or task
-#################
 #SBATCH --mem=32G
-#################
-set -x
 
+set -x
 module purge
 source ~/.bashrc
 eval $(line_assign.sh $SLURM_ARRAY_TASK_ID samples.txt)
 cd $1
-
 conda activate gatk4.2.5.0
 
 ##Make dir to put tables/bams
 mkdir -p results/bqsr
+
 ##these are all the input/ouput names and directories
 inDir=results/bams
 bam=$sample.mergeMkDup.bam

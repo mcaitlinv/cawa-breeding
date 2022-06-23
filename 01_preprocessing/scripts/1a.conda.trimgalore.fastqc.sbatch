@@ -1,37 +1,16 @@
 #!/bin/bash 
-#
-#all commands that start with SBATCH contain commands that are just used by SLURM for scheduling  
-#################
-#set a job name  
 #SBATCH --job-name=1a.trim.fastqc
-#################  
-#a file for job output, you can check job progress
 #SBATCH --output=results/slurm_logs/trim/1a.trim.fastqc.%j.out
-#################
-# a file for errors from the job
 #SBATCH --error=results/slurm_logs/trim/1a.trim.fastqc.%j.err
-#################
-#time you think you need; default is one hour
-#in minutes in this case
-#SBATCH -t 01:00:00
-#################
+#SBATCH --time=01:00:00
 #SBATCH --array=1-299
-#################
-#quality of service; think of it as job priority
 #SBATCH --qos=normal
 #SBATCH --partition=shas
-#################
-#number of nodes
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=8
-#################
-#get emailed about job BEGIN, END, and FAIL
 #SBATCH --mail-type=END
-#################
-#who to send email to; please change to your email
-#SBATCH  --mail-user=caitlinv@colostate.edu
-#################
-#echo commands to stdout
+#SBATCH --mail-user=caitlinv@colostate.edu
+
 set -x
 
 module purge
@@ -56,11 +35,8 @@ O2=`basename $T2 _val_2.fq.gz`.trim.fq.gz
 
 fastqc -o results/qc/fqFASTQC --noextract fastqs/$fq1 fastqs/$fq2 > results/logs/qc/fqFASTQC/fastqc."$fq1".log 2>&1
 
-
-
 ###Trim low quality fragments and adapters
 trim_galore -q 5 --paired --cores 8 --output_dir results/trim fastqs/$fq1 fastqs/$fq2
-
 
 ##Fastp for trimming the poly-g tails
 /projects/caitlinv@colostate.edu/software/fastp --in1  results/trim/$T1 --out1 results/trim/$O1 \

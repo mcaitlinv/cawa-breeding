@@ -1,23 +1,16 @@
 #!/bin/bash
-#set a job name
 #SBATCH --job-name=7a.mergeVcfs
-#SBATCH --output=results/slurm_logs/variants2/7a.mergeVcfs.%j.out
-#SBATCH --error=results/slurm_logs/variants2/7a.mergeVcfs.%j.err
-################
-#SBATCH --time=24:00:00
+#SBATCH --output=results/slurm_logs/variants/7a.mergeVcfs.%j.out
+#SBATCH --error=results/slurm_logs/variants/7a.mergeVcfs.%j.err
+#SBATCH --time=12:00:00
 #SBATCH --qos=normal
 #SBATCH --partition=shas
-#################
-# Note: 4.84G/core or task
-#################
 #SBATCH --mem=32G
-#################
-set -x
 
+set -x
 module purge
 source ~/.bashrc
 cd $1
-
 conda activate bcftools
 
 ##Make temp dir, bcftools was not finding default tmp
@@ -32,9 +25,6 @@ outDir=results/variants2
 outname=cawa.bqsr.unfiltered
 
 ##No need to index, gatk already made it
-##bcftools concat for bcfs
+##bcftools concat for vcfs
 bcftools concat -a  --threads 8 -f $vcfs -Oz -o $outDir/"$outname".vcf.gz
 bcftools sort -m 30G -T tmp -Oz -o $outDir/"$outname".sort.vcf.gz  $outDir/"$outname".vcf.gz
-
-
-

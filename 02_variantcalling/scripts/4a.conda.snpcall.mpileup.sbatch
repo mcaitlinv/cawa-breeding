@@ -1,20 +1,14 @@
 #!/bin/bash
-#set a job name
 #SBATCH --job-name=4a.mpileup
 #SBATCH --output=results/slurm_logs/variants/4a.mpileup.%A.%a.out
 #SBATCH --error=results/slurm_logs/variants/4a.mpileup.%A.%a.err
-################
 #SBATCH --time=24:00:00
-#SBATCH --qos=normal
 #SBATCH --partition=shas
-#################
-# Note: 4.84G/core or task
-#################
+#SBATCH --qos=normal
 #SBATCH --mem=16G
 #SBATCH --array=1-535
-#################
-set -x
 
+set -x
 module purge
 source ~/.bashrc
 conda activate bcftools
@@ -34,5 +28,5 @@ ls results/bams/*mergeMkDup.bam > cawa.all.bam.list
 bamlist=cawa.all.bam.list
 reference="/projects/caitlinv@colostate.edu/genomes/cardellina_canadensis_pseudohap_v1.fasta"
 
+##get genotype likelkhoods then call snps
 bcftools mpileup -Ou -f $reference -R ${intervals} --annotate FORMAT/AD,FORMAT/DP -b ${bamlist} | bcftools call -mv -Ob -o ${outname}
-

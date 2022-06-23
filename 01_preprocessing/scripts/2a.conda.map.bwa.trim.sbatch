@@ -1,40 +1,17 @@
 #!/bin/bash
-#
-#all commands that start with SBATCH contain commands that are just used by SLURM for scheduling
-#################
-#set a job name
 #SBATCH --job-name=2a.bwa
-#################
-#a file for job output, you can check job progress for each sample
 #SBATCH --output=results/slurm_logs/map/2a.bwa.%j.out
-#################
-# a file for errors from the job for each sample
 #SBATCH --error=results/slurm_logs/map/2a.bwa.%j.err
-#################
-#time you think you need; default is one hour
-#in minutes in this case
-#SBATCH -t 03:00:00
-#################
+#SBATCH --time=03:00:00
 #SBATCH --array=1-299
-#################
-#number of nodes
-#SBATCH -N 1
+#SBATCH --qos=normal
+#SBATCH --partition=shas
 #SBATCH --ntasks-per-node 8
-#################
 #SBATCH --mem=16G
-#################
-#get emailed about job BEGIN, END, and FAIL
 #SBATCH --mail-type=END
-#################
-#who to send email to; please change to your email
-#SBATCH  --mail-user=caitlinv@colostate.edu
-#################
-#now run normal batch commands
-##################
-#echo commands to stdout
-set -x
-##################
+#SBATCH --mail-user=caitlinv@colostate.edu
 
+set -x
 module purge 
 source ~/.bashrc
 eval $(line_assign.sh $SLURM_ARRAY_TASK_ID numbered-units.txt)

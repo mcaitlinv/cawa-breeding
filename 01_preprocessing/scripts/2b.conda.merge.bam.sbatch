@@ -1,50 +1,32 @@
 #!/bin/bash
-#
-#all commands that start with SBATCH contain commands that are just used by SLURM for scheduling
-#################
-#set a job name
 #SBATCH --job-name=2b.merge.bams
-#################
-#a file for job output, you can check job progress
 #SBATCH --output=results/slurm_logs/bams/2b.merge.bams.%j.out
-#################
-# a file for errors from the job
 #SBATCH --error=results/slurm_logs/bams/2b.merge.bams.%j.err
-#################
-# a file for errors from the job
 #SBATCH --array=1-181
-#################
-#time you think you need; default is one hour
-#in minutes in this case
-#SBATCH -t 01:30:00
-#################
-#number of nodes
-#SBATCH --nodes=1
+#SBATCH --time=01:30:00
+#SBATCH --qos=normal
+#SBATCH --partition=shas
 #SBATCH --ntasks=8
-#################
 #SBATCH --mem=16G
-#################
-#get emailed about job BEGIN, END, and FAIL
 #SBATCH --mail-type=END
-#################
-#who to send email to; please change to your email
-#SBATCH  --mail-user=caitlinv@colostate.edu
-#################
-#echo commands to stdout
+#SBATCH --mail-user=caitlinv@colostate.edu
 
 set -x
-
 module purge
 eval $(line_assign.sh $SLURM_ARRAY_TASK_ID samples.txt)
 source ~/.bashrc
 
 cd $1
 conda activate bwasam
+
 ##Get all bams of a single sample name
 ls -d results/bams/*"$sample"*.mkdup.bam > results/bams/"$sample".txt
 
+##Get count of all bams for each sample
 wcBam=$(wc -l < results/bams/"$sample".txt)
 
+##if only 1 bam, just rename and move
+##else merge multiple bams and move final bam
 if expr "$wcBam" : '[1]'
 then
 echo "Single bam, skipping merge"
@@ -72,5 +54,3 @@ samtools markdup  results/bams/"$sample".fixm.sort.bam  results/bams/"$sample".m
 samtools index  results/bams/"$sample".mergeMkDup.bam
 rm  results/bams/"$sample".fixm.sort.bam
 fi
-
-
