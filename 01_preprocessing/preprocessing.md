@@ -37,7 +37,7 @@ cawa-breeding-lcwg
 ```
 
 Workflow
-1. Trimming adaptors and qc: 
+1. [Trimming adaptors and qc](https://github.com/mcaitlinv/cawa-breeding/blob/main/01_preprocessing/preprocessing.md#1-trimming-adaptors-and-quality-control) 
 2. Mapping and marking dups:
 3. Checking sample coverage:
 
