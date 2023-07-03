@@ -1,0 +1,427 @@
+---
+title: "PCA SRS"
+author: "Caitlin Miller"
+date: '2022-06-08'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#remotes::install_github("eriqande/srsStuff", upgrade = FALSE)
+library(srsStuff)
+library(tidyverse)
+library(RColorBrewer)
+```
+
+```{r manipulate data}
+##Did this bit on cluster with runR.sbatch and srsData.R script
+#snames <- read_lines("input/cawa_names.txt")
+#allCAWA<-srs_covar(file="input/allele_depths_0.8.txt", sample_names=snames, freq_thresh = 0)
+#saveRDS(allCAWA, "cawa.srs.filtered.rds")
+```
+
+
+Incorporate the meta data
+```{r}
+meta<-read.table("input/cawa_seq_metadata.txt")
+colnames(meta) <- c("sample", "region", "state", "pop", "sex", "type", "lat", "long", "month", "date", "breed", "cov", "plate", "combined", "year", "platform")
+
+meta <- meta %>% dplyr::select(sample,region, pop,sex, type,cov, plate,combined, year, platform) %>% rename(vcf_name=sample,Region_site=region,Region_pop=pop, sex=sex, cov=cov,plate=plate, combined=combined, year=year, platform=platform)
+meta$cov <- round(meta$cov, 0)
+
+```
+
+Next to create the matrix
+# A function from Eric to get everything prepped and tidy
+```{r prepoutput function}
+prep_output <- function(A) {
+
+  # first for each individual i, get the number of sites at which
+  # that individual had a read and also another individual, j, averaged
+  # over all j.  This tells us on average how many markers went into
+  # compute the covariance for each individual.
+  m <- A$M
+  diag(m) <- 0
+  ave_sites <- tibble(
+    vcf_name = A$sample_names,
+    ave_sites = rowMeans(m) * ncol(m) / (ncol(m) - 1)
+  )
+
+  # do the whole eigendecomposition on the standard covariance matrix.
+  eig <- eigen(A$Cov)
+  colnames(eig$vectors) <- sprintf("PC-%02d", 1:ncol(eig$vectors))
+
+
+  pca_tib <- as_tibble(eig$vectors[,1:6]) %>%
+    mutate(vcf_name = A$sample_names) %>%
+    dplyr::select(vcf_name, everything())
+
+  pca_long <- pca_tib %>%
+    tidyr::gather(., key = "PC", "val", -vcf_name)
+
+  # then expand a grid of the possible comparisons (ordered)
+  pca_pairs <- expand.grid(vcf_name = pca_tib$vcf_name,
+                           PCx = sprintf("PC-%02d", 1:6),
+                           PCy = sprintf("PC-%02d", 1:6),
+                           stringsAsFactors = FALSE) %>%
+    tibble::as_tibble() %>%
+    dplyr::left_join(., pca_long, by = c("vcf_name", "PCx" = "PC")) %>%
+    dplyr::rename(val_x = val) %>%
+    dplyr::left_join(pca_long, by = c("vcf_name", "PCy" = "PC")) %>%
+    dplyr::rename(val_y = val)  %>%
+    left_join(ave_sites, by = "vcf_name") %>%
+    left_join(meta, by = "vcf_name")
+
+  WaG <- (A$IBS - A$Mt_S) / (1 - A$Mt_S)
+  eig <- eigen(WaG)
+  colnames(eig$vectors) <- sprintf("PC-%02d", 1:ncol(eig$vectors))
+
+
+  pca_tib <- as_tibble(eig$vectors[,1:6]) %>%
+    mutate(vcf_name = A$sample_names) %>%
+    dplyr::select(vcf_name, everything())
+
+  pca_long <- pca_tib %>%
+    tidyr::gather(., key = "PC", "val", -vcf_name)
+
+  pcp <- expand.grid(vcf_name = pca_tib$vcf_name,
+                     PCx = sprintf("PC-%02d", 1:6),
+                     PCy = sprintf("PC-%02d", 1:6),
+                     stringsAsFactors = FALSE) %>%
+    tibble::as_tibble() %>%
+    dplyr::left_join(., pca_long, by = c("vcf_name", "PCx" = "PC")) %>%
+    dplyr::rename(WaG_x = val) %>%
+    dplyr::left_join(pca_long, by = c("vcf_name", "PCy" = "PC")) %>%
+    dplyr::rename(WaG_y = val)
+
+  # then join those both and return them
+  left_join(pcp, pca_pairs,
+            by = c("vcf_name", "PCx", "PCy"))
+}
+```
+
+## CAWA standard filter, no FST filter, 1,052,774 SNPs
+
+```{r}
+allCAWA <- readRDS("cawa.srs.filtered.rds")
+breedingCAWA.prep <- prep_output(allCAWA)
+subsetBreedingCAWA.prep1 <- breedingCAWA.prep %>% filter(PCx == c("PC-01")) %>%  filter(PCy == c( "PC-02"))
+subsetBreedingCAWA.prep1$filter <- "noFST"
+
+
+avesites <- ggplot(subsetBreedingCAWA.prep1, aes(x = val_x, y = val_y, color = ave_sites))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+avesites
+
+bp <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = Region_pop))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+bp
+
+sex <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = sex))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+sex
+
+plate <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = as.factor(plate)))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+plate
+
+platform1 <- ggplot(subsetBreedingCAWA.prep1, aes(x = val_x, y = val_y, color = platform))+
+  #facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  labs(x="PC1", y="PC2", title="PCA of all variants without FST filtering")+
+  theme_bw() + theme(legend.position="none")
+
+svg("plots/beforeFSTremoval.svg")
+platform
+dev.off()
+
+combined <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = combined ))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+combined 
+
+type <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = type))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+type
+
+year <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = year))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+year
+
+cov <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = as.factor(cov)))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+cov
+```
+
+## CAWA standard filter, fst outliers 99th percentile, FST >0.4, 1,050,674 SNPs
+
+```{r}
+rm(allCAWA)
+allCAWA <- readRDS("cawa.srs.filtered.99fst.rds")
+breedingCAWA.prep <- prep_output(allCAWA)
+subsetBreedingCAWA.prep2 <- breedingCAWA.prep 
+#%>% filter(PCx == c("PC-01", "PC-02", "PC-03")) %>%  filter(PCy == c( "PC-02", "PC-03"))
+subsetBreedingCAWA.prep2$filter <- "99th"
+
+platform <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = platform))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+platform
+
+combined <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = combined ))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+combined 
+
+```
+
+## CAWA standard filter, fst outliers 95th percentile, FST >0.152915, 1,008,497 SNPs
+
+```{r}
+rm(allCAWA)
+allCAWA <- readRDS("cawa.srs.filtered.95fst.rds")
+breedingCAWA.prep <- prep_output(allCAWA)
+subsetBreedingCAWA.prep3 <- breedingCAWA.prep 
+#%>% filter(PCx == c("PC-01", "PC-02", "PC-03")) %>%  filter(PCy == c( "PC-02", "PC-03"))
+subsetBreedingCAWA.prep3$filter <- "95th"
+
+
+platform <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = platform))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+platform
+
+combined <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = combined ))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+combined 
+```
+
+## CAWA standard filter, fst outliers 90th percentile, FST >0.0812, 944,147 SNPs
+
+```{r}
+rm(allCAWA)
+allCAWA <- readRDS("cawa.srs.filtered.90fst.rds")
+breedingCAWA.prep <- prep_output(allCAWA)
+subsetBreedingCAWA.prep4 <- breedingCAWA.prep 
+#%>% filter(PCx == c("PC-01", "PC-02", "PC-03")) %>%  filter(PCy == c( "PC-02", "PC-03"))
+subsetBreedingCAWA.prep4$filter <- "90th"
+
+
+platform <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = platform))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+platform
+
+combined <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = combined ))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"), legend.position = )
+  
+combined 
+```
+
+## CAWA standard filter, fst outliers 85th percentile, FST >0.0461, 877,581 SNPs
+
+```{r}
+rm(allCAWA)
+allCAWA <- readRDS("cawa.srs.filtered.85fst.rds")
+breedingCAWA.prep <- prep_output(allCAWA)
+subsetBreedingCAWA.prep5 <- breedingCAWA.prep %>% filter(PCx == c("PC-01")) %>%  filter(PCy == c( "PC-02"))
+subsetBreedingCAWA.prep5$filter <- "85th"
+
+platform2 <- ggplot(subsetBreedingCAWA.prep5, aes(x = val_x, y = val_y, color = platform))+
+  #facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) + 
+  labs(x="PC1", y="PC2", title="PCA of all variants with 85th percentile FST filtering")+
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"), legend.position = c(.95, .95),
+    legend.justification = c("right", "top"),
+    legend.box.just = "right",
+    legend.margin = margin(6, 6, 6, 6))
+
+library(cowplot)
+cow_plat <- cowplot::plot_grid(platform1,platform2, nrow = 1, ncol=2)
+
+pdf(file="plots/before.after.pca.contrast.pdf")
+platform
+dev.off()
+
+combined <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = combined ))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+combined 
+
+bp <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = Region_pop))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+bp
+```
+
+## CAWA standard filter, fst outliers 80th percentile, FST >0.02285, 810,796 SNPs
+
+```{r}
+rm(allCAWA)
+allCAWA <- readRDS("cawa.srs.filtered.80fst.rds")
+breedingCAWA.prep <- prep_output(allCAWA)
+subsetBreedingCAWA.prep6 <- breedingCAWA.prep 
+#%>% filter(PCx == c("PC-01", "PC-01", "PC-03")) %>%  filter(PCy == c( "PC-02", "PC-03"))
+subsetBreedingCAWA.prep6$filter <- "80th"
+
+platform <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = platform))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+platform
+
+combined <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = combined))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+  
+combined 
+```
+
+
+```{r everything plotted}
+
+##Get all data together
+all.filters <- subsetBreedingCAWA.prep1 %>% full_join(subsetBreedingCAWA.prep2) %>% full_join(subsetBreedingCAWA.prep3) %>% full_join(subsetBreedingCAWA.prep4) %>% full_join(subsetBreedingCAWA.prep5) %>% full_join(subsetBreedingCAWA.prep6)
+
+PC1.2 <- all.filters  %>% filter(PCx == "PC-01") %>%  filter(PCy =="PC-02")
+##Plot PCAs
+platform <- ggplot(PC1.2 %>% filter(filter=="noFST"), aes(x = val_x, y = val_y, color = platform))+
+  #facet_wrap(as.factor(PC1.2$filter)) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 2, stroke = 0.15) +
+  theme_bw() +labs(
+    title = "Standard filtering",
+    x = "PC1",
+    y = "PC2"
+  )+ scale_fill_discrete(labels=c("HiSeq 2500", "NovaSeq 5000"))+ theme(legend.title = element_blank())+theme(legend.position = c(0.2, 0.9))
+
+platform1 <- ggplot(PC1.2 %>% filter(filter=="noFST"), aes(x = val_x, y = val_y, color = platform))+
+  #facet_wrap(as.factor(PC1.2$filter)) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 2, stroke = 0.15) +
+  theme_bw() +labs(
+    title = "Standard filtering",
+    x = "PC1",
+    y = "PC2"
+  )+ theme(legend.position="none")
+
+platform2 <- ggplot(PC1.2 %>% filter(filter=="99th"), aes(x = val_x, y = val_y, color = platform))+
+  #facet_wrap(as.factor(PC1.2$filter)) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 2, stroke = 0.15) +
+  theme_bw() +labs(
+    title = "Filtered 99th percentile FST",
+    x = "PC1",
+    y = "PC2"
+  ) + theme(legend.position="none")
+
+platform3 <- ggplot(PC1.2 %>% filter(filter=="95th"), aes(x = val_x, y = val_y, color = platform))+
+  #facet_wrap(as.factor(PC1.2$filter)) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 2, stroke = 0.15) +
+  theme_bw() +labs(
+    title = "Filtered 95th percentile FST",
+    x = "PC1",
+    y = "PC2"
+  ) + theme(legend.position="none")
+
+platform4 <- ggplot(PC1.2 %>% filter(filter=="90th"), aes(x = val_x, y = val_y, color = platform))+
+  #facet_wrap(as.factor(PC1.2$filter)) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 2, stroke = 0.15) +
+  theme_bw() +labs(
+    title = "Filtered 90th percentile FST",
+    x = "PC1",
+    y = "PC2"
+  ) + theme(legend.position="none")
+
+platform5 <- ggplot(PC1.2 %>% filter(filter=="85th"), aes(x = val_x, y = val_y, color = platform))+
+  #facet_wrap(as.factor(PC1.2$filter)) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 2, stroke = 0.15) +
+  theme_bw() +labs(
+    title = "Filtered 85th percentile FST",
+    x = "PC1",
+    y = "PC2"
+  ) + theme(legend.position="none")
+platform6 <- ggplot(PC1.2 %>% filter(filter=="80th"), aes(x = val_x, y = val_y, color = platform))+
+  #facet_wrap(as.factor(PC1.2$filter)) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 2, stroke = 0.15) +
+  theme_bw() +labs(
+    title = "Filtered 80th percentile FST",
+    x = "PC1",
+    y = "PC2"
+  ) + theme(legend.position="none")
+
+
+
+library(cowplot)
+cow_ABC <- cowplot::plot_grid(platform3,platform4, platform5, platform6, nrow = 2, ncol=2)
+
+cow2 <- cowplot::plot_grid(platform, cow_ABC, ncol=2, rel_widths = c(1,1))
+
+```
