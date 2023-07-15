@@ -49,7 +49,7 @@ After finding platform effects, I decided to split samples that were run on both
 Scripts: 
   1) [pca.sequencer.rmd](https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/pca.sequencer.html)
   
-Using the filtered variant sets, I used PCA to check when platform associated clustering on PCA was not the primary separation. I decided the 85th percentile group had the least platform effects while still maintining as many variants as possible. I used this variant set as my filtered, primary variant set for the rest of the analysis. 
+Using the filtered variant sets, I used PCA to check when platform associated clustering on PCA was not the primary separation. I decided the 85th percentile group had the least platform effects while still maintaining as many variants as possible. I used this variant set as my filtered, primary variant set for the rest of the analysis. 
 
 ## 4) Impute missing data
 
@@ -58,4 +58,4 @@ Scripts:
   2) [8b.conda.beagle.impute.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/8b.conda.beagle.impute.sbatch)
   3) [8c.conda.beagle.impute.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/8c.conda.beagle.impute.sbatch)
 
-Because some of the downstream analyses do not deal with missing data very well, I imputed missing data. Initial filtering filtered out any variant with more than 20% missing across individuals. Imputation was done using genotype likelihoods. 
+Because some of the downstream analyses do not deal with missing data very well, I imputed missing data using `beagle`. Initial filtering filtered out any variant with more than 20% missing across individuals. Imputation was done using genotype likelihoods. 
