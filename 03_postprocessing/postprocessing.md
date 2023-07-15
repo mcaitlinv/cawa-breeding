@@ -6,6 +6,7 @@ GATK 4.2.5.0
 picard  2.26.11
 samtools  1.11
 bedtools 2.30.0
+beagle 4.1
 R version 4.1.2
 R packages:
   srsStuff 0.1.0
@@ -19,6 +20,7 @@ Workflow
 1. Initial check by PCA for any clustering due to sex, coverage, etc. 
 2. Find and remove variants based on sequencing platform
 3. Re-check PCA
+4. Impute missing data
 
 ## 1) Initial check by PCA for any clustering due to sex, coverage, etc.
 
@@ -48,3 +50,12 @@ Scripts:
   1) [pca.sequencer.rmd](https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/pca.sequencer.html)
   
 Using the filtered variant sets, I used PCA to check when platform associated clustering on PCA was not the primary separation. I decided the 85th percentile group had the least platform effects while still maintining as many variants as possible. I used this variant set as my filtered, primary variant set for the rest of the analysis. 
+
+## 4) Impute missing data
+
+Scripts: 
+  1) [8a.conda.beagle.impute.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/8a.conda.beagle.impute.sbatch)
+  2) [8b.conda.beagle.impute.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/8b.conda.beagle.impute.sbatch)
+  3) [8c.conda.beagle.impute.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/8c.conda.beagle.impute.sbatch)
+
+Because some of the downstream analyses do not deal with missing data very well, I imputed missing data. Initial filtering filtered out any variant with more than 20% missing across individuals. Imputation was done using genotype likelihoods. 
