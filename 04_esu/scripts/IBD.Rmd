@@ -1,0 +1,519 @@
+---
+title: "Isolation by distance"
+author: "Caitlin Miller"
+date: "08/01/2022"
+output: html_document
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+library(cluster)
+library(tidyverse)
+library(ecodist)
+library(vegan)
+library(sp)
+library(Gifi)
+library(ggplot2)
+library(graph4lg)
+library(RColorBrewer)
+```
+
+## Why isolation by distance?
+
+Canada warblers have shockingly low genetic variance explained on PCA- 0.9% on PC1. And there appears to be a signal of geography in the data. Need to test if geography is what explains the genetic variation.
+
+
+
+
+## Using different input values for our FST
+
+Files were created first with angsd to get site allele frequency file (saf), beagle, mafs, and genotype likelihood(geno). 
+
+```{bash ANGSD sites, eval=FALSE, include=TRUE}
+/projects/caitlinv@colostate.edu/software/angsd/angsd -bam "$j" -P 24 -ref /projects/caitlinv@colostate.edu/genomes/cardellina_canadensis_pseudohap_v1.fasta -anc /projects/caitlinv@colostate.edu/genomes/cardellina_canadensis_pseudohap_v1.fasta \
+	 -dosaf 1 \
+	-uniqueOnly 1 -remove_bads 1 -baq 1 -C 50 \
+	-doGlf 2 \
+	-minInd $num -doCounts 1 \
+	-GL 1 -doMajorMinor 4 -doMaf 1 \
+	-doGeno 32 -doPost 1 \
+	-sites $3 -out "$outfile".majmin4
+```
+
+Then the SAF files were fed into realSFS which calculated a pairwise comparison for each site that generated the files 
+
+```{bash ANGSD fst, eval=FALSE, include=TRUE}
+##Getting the sfs between sites
+/projects/caitlinv@colostate.edu/software/angsd/misc/realSFS.old -P 24  "$POP1"."$name".saf.idx  "$POP2"."$name".saf.idx 2> /dev/null > "$POP1"."$POP2"."$name".sfs
+
+##Getting samesite estimate of ml
+/projects/caitlinv@colostate.edu/software/angsd/misc/realSFS -P 24  "$POP1"."$name".saf.idx  "$POP2"."$name".saf.idx   > "$POP1"."$POP2"."$name".samesite.estim.ml
+
+##FST for each site
+/projects/caitlinv@colostate.edu/software/angsd/misc/realSFS fst index  -P 24  "$POP1"."$name".saf.idx  "$POP2"."$name".saf.idx  -sfs "$POP1"."$POP2"."$name".samesite.estim.ml -fstout "$POP1"."$POP2"."$name".realsfs -whichFST 1
+
+##FST for 50kb window, 25 kb slide
+/projects/caitlinv@colostate.edu/software/angsd/misc/realSFS  fst stats2 "$POP1"."$POP2"."$name".realsfs.fst.idx -win 50000 -step 25000 -whichFST 1 > "$POP1"."$POP2"."$name".fst.50kbwin.txt
+
+##FST globally between sites
+/projects/caitlinv@colostate.edu/software/angsd/misc/realSFS  fst stats "$POP1"."$POP2"."$name".realsfs.fst.idx > "$POP1"."$POP2"."$name".fst.global.txt
+
+##get list at end
+for f in *.minInd0.7.majmin4.fst.global.txt; do site1=$(echo $f | cut -f1,2 -d '.');site2=$(echo $f | cut -f3,4 -d '.');var=$(cat $f); echo $site1 $site2 $var;done > pw.fst.txt
+
+```
+
+
+## Getting FST into a matrix
+
+```{r getting input matrices in order, include=T, eval=F}
+##Genetic distances
+##Read in pairwise fst weighted and unweighted
+fst_list <- read.table("input/allSites.fst.global.long.230203.txt", header=F)
+fst_list[fst_list<0] <- 0
+colnames(fst_list) <- c("site1", "site2", "unweight", "weight")
+fst_list$site1 <- stringr::str_replace(fst_list$site1, "QC.St-Fulgence", "QC.StFulgence")
+fst_list$site2 <- stringr::str_replace(fst_list$site2, "QC.St-Fulgence", "QC.StFulgence")
+
+##Making linearized weighted fst matrix
+fst_list <- fst_list %>% select(-weight)
+#fstWeight_list$ME.Dallas <- NA
+fst_wider<- fst_list %>%
+  pivot_wider(names_from = site2, values_from = unweight)
+
+fst_wider<- fst_wider %>% select(AB.FortMacKay, AB.FortMcMurray,
+                                             AB.SlaveLake, MB.Rennie,    
+                                             MN.Finland, NB.McAdam, NC.Otto, 
+                                             NH.Canaan, NY.MooseRiver,
+                                             PA.BrightRun, PA.WolfRun, QC.Laterriere,
+                                             QC.StFulgence, RI.SpragueFarm, 
+                                             WI.EauClaire, WV.Richwood)
+
+write.table(as.matrix(fst_wider), file="matrices/fst_matrix.txt",row.names=T,quote=T,sep="\t")
+
+fst_list <- read.table("input/allSites.fst.global.long.230203.txt", header=F)
+fst_list[fst_list<0] <- 0
+colnames(fst_list) <- c("site1", "site2", "unweight", "weight")
+fst_list$site1 <- stringr::str_replace(fst_list$site1, "QC.St-Fulgence", "QC.StFulgence")
+fst_list$site2 <- stringr::str_replace(fst_list$site2, "QC.St-Fulgence", "QC.StFulgence")
+
+##linearize fst values
+fst_list$linweight <- (fst_list$weight/(1-fst_list$weight))
+fst_list$linunweight <- (fst_list$unweight/(1-fst_list$unweight))
+
+write.table(fst_list, file="input/linear.pw.fst.txt",row.names=T,quote=T,sep="\t")
+
+##Making linearized weighted fst matrix
+fstWeight_list <- fst_list %>% select(-unweight, -linunweight, -weight)
+#fstWeight_list$ME.Dallas <- NA
+
+fstweight_wider<- fstWeight_list %>%
+  pivot_wider(names_from = site2, values_from = linweight)
+
+fstweight_wider<- fstweight_wider %>% select(AB.FortMacKay, AB.FortMcMurray,
+                                             AB.SlaveLake, MB.Rennie,    
+                                             MN.Finland, NB.McAdam, NC.Otto, 
+                                             NH.Canaan, NY.MooseRiver,
+                                             PA.BrightRun, PA.WolfRun, QC.Laterriere,
+                                             QC.StFulgence, RI.SpragueFarm, 
+                                             WI.EauClaire, WV.Richwood)
+write.table(as.matrix(fstweight_wider), file="matrices/linfst_weighted.txt",row.names=T,quote=T,sep="\t")
+
+#Making linearized unweighted matrix
+fstUnweight_list <- fst_list %>% select(-weight, -unweight, -linweight)
+fstUnweight_wider<- fstUnweight_list %>%
+  pivot_wider(names_from = site2, values_from = linunweight)
+fstUnweight_wider<- fstUnweight_wider %>% select(AB.FortMacKay, AB.FortMcMurray,
+                                             AB.SlaveLake, MB.Rennie,    
+                                             MN.Finland, NB.McAdam, NC.Otto, 
+                                             NH.Canaan, NY.MooseRiver,
+                                             PA.BrightRun, PA.WolfRun,
+                                             QC.Laterriere,QC.StFulgence,
+                                             RI.SpragueFarm, WI.EauClaire,
+                                             WV.Richwood)
+write.table(as.matrix(fstUnweight_wider), file="matrices/linfst_unweighted.txt",row.names=T,quote=T,sep="\t")
+rm(list = ls())
+
+```
+
+## After setting up our matrices for the FST values
+
+Since fst was dependent on filtering, it remains in its own directories. Now I'm going to make the environmental matrices which I will use for both sets of fsts.
+
+```{r environmental data prep, include=T, eval=F}
+
+##Make the matrix of scaled environmental variables from gradient forest 
+env <- read.table('../gradFor/cawaEnv.220627.txt',sep="\t",header=T) %>% dplyr::select("tree", "bio10", "bio13","bio15")
+sites <- read.table('input/site.txt',sep="\t",header=F)
+sites <- sites %>% filter(V1 != "ME.Dallas" ) %>% filter(V1 != "ON.ThunderBay")
+
+#Remove dropped sites
+env$sites <- sites[,1]
+env <- env[,1:4]
+
+##Get scaled environmental distance
+scalenv <- scale(env, center = T, scale = T)
+dist_scalenv<-dist(scalenv)
+as.matrix(dist_scalenv)
+write.table(as.matrix(dist_scalenv),"matrices/cawa.scalenvDist.tree.bio10.bio13.bio15.matrix.txt",row.names=T,quote=T,sep="\t")
+
+
+# ##check the scaled matrix and get PCs of the environmental vars
+# env <-read.table('matrices/cawa.scalenvDist.tree.bio04.bio10.bio15.bio18.matrix.txt',sep="\t",header=T) 
+# rownames(env)<- sites
+# env_prcomp<-prcomp(env,scale = TRUE)
+# ##Chekc PC stdev, cum var, proportion var
+# summary(env_prcomp)
+# ##Visualize the pcs
+# plot(prcomp(env))
+# summary(prcomp(env, scale = TRUE))
+# 
+# #biplot(prcomp(env, scale = TRUE))##Not working
+# pca_env <- princals(env[,c(1:18)], ndim = 4, ordinal = TRUE, missing = 'a', normobj.z = TRUE)  ## ordinal PCA
+# pca_env
+# 
+# ##write the PC loadings to a results table
+# summary(pca_env) %>% write.table('results/cawa.env.pca.table.loadings.txt',row.names=F,quote=F,sep="\t")
+# ##Not working
+# # par(mar=c(1,1,1))
+# # plot(pca_env, plot.type = "transplot")
+# # pdf('results/loadingplot.pca.env.uncor.pdf',useDingbats = F)
+# # par(mfrow=c(1,1))
+# # plot(pca_env, "loadplot", main = "Loadings Plot ABC Data")  ## aspect ratio = 1
+# # #points(alldata2$D1,alldata2$D2,col=alldata2$Latcat1,pch=16)
+# # dev.off()
+# #plot(pca_env, "biplot")
+# #plot(pca_env, "screeplot")
+# 
+# #add PCA scores to data
+# pca_env2<-cbind(env, pca_env$objectscores)
+# env_mat_pca<-as.matrix(daisy(pca_env2[c("D1")],metric = "euclidean",type = list()))
+# env_mat_pca[upper.tri(env_mat_pca)] <- NA
+# env_mat_pca %>% write.table("matrices/cawa.envDist.pcaD1.bio10.bio13.bio15.matrix.txt",row.names=T,quote=T,sep="\t")
+
+##Get the matrix of geographic distance
+cawaEnv <- read.table('input/cawaEnv.txt',sep="\t",header=T) 
+cawaEnv <- cawaEnv[, 1:2]
+sites <- read.table('input/site.txt',sep="\t",header=F)
+cawaEnv$sites <- sites
+cawaEnv <- cawaEnv %>% filter(sites != "ME.Dallas" ) %>% filter(sites != "ON.ThunderBay")
+
+
+##Use lat/long to make spatial points
+p1 <- SpatialPoints(dplyr::select(cawaEnv, long, lat))
+p2 <- SpatialPoints(dplyr::select(cawaEnv, long, lat))
+proj4string(p1) <- CRS("+proj=longlat +datum=WGS84")
+proj4string(p2) <- CRS("+proj=longlat +datum=WGS84")
+##Pairwise comparison of spatial points in matrix
+gdist<-spDists(p1, p2, diagonal=F)
+colnames(gdist) <- t(cawaEnv$sites)
+gdist %>% write.table("matrices/cawa.geographicdist.matrix.txt",row.names=T,quote=T,sep="\t")
+rm(list = ls())
+```
+
+
+## Now to check for relationship between distance, environment, and genetics 
+
+```{r mantel and partial mantel}
+##Read in the weighted genetic distance
+sites<- read.table('input/site.txt',sep="\t",header=F)
+sites<- sites %>% filter(V1 != "ME.Dallas") %>% filter(V1 != "ON.ThunderBay")
+fst_pair<-read.table('matrices/linfst_unweighted.txt',sep="\t",header=T,row.names=1)
+rownames(fst_pair) <- sites[,1]
+fst_pair <- as.matrix(fst_pair)
+
+##Read in the geographic distance matrix
+gdist<-read.table("matrices/cawa.geographicdist.matrix.txt",sep="\t",header=T,row.names=1)
+rownames(gdist) <- sites[,1]
+gdist <- as.matrix(gdist)
+
+##Read in environmental distances
+scalenv <- read.table('matrices/cawa.scalenvDist.tree.bio10.bio13.bio15.matrix.txt',sep="\t",header=T,row.names=1)
+scalenv <- as.matrix(scalenv)
+
+## With only genetic and distance to test for only isolation by distance
+sink(file="results/mantel.xfst.ygdist.230203.txt")
+mantel(xdis = fst_pair, ydis= gdist, method="pearson")
+sink()
+
+## With only genetic and environment to test for only isolation by environment
+sink(file="results/mantel.xfst.yenvdist.230203.txt")
+mantel(xdis = fst_pair, ydis= scalenv, method="pearson")
+sink()
+
+##partial mantel to test isolation by distance when accounting for environment
+sink(file="results/pmantel.xfst.ygdist.zenvdist.230203.txt")
+mantel.partial( fst_pair,gdist,scalenv, method = "pearson", permutations = 999)
+sink()
+
+##partial mantel to test isolation by environment when accounting for distance
+sink(file="results/pmantel.xfst.yenvdist.zgdist.230203.txt")
+mantel.partial(fst_pair,scalenv,  gdist, method = "pearson", permutations = 999)
+sink()
+```
+
+
+
+```{r Graphing PWFST}
+##Graph pairwise comparisons of linearized FST to geographic distance
+##A lot of manipulation to get the matrix values back into dataframes
+gdist<-read.table("matrices/cawa.geographicdist.matrix.txt",sep="\t",header=T,row.names=1)
+colnames(gdist) <- sites[,1]
+gdist <- as.data.frame(gdist)
+gdist$site2 <- sites[,1]
+gdist.df<- gdist %>%
+  pivot_longer(!site2, names_to = "site1", values_to = "gdist")
+
+fst_list <- read.table("input/allSites.fst.global.230203.txt", header=F)
+fst_list[fst_list<0] <- 0
+colnames(fst_list) <- c("site1", "site2", "unweight", "weight")
+fst_list$site1 <- stringr::str_replace(fst_list$site1, "QC.St-Fulgence", "QC.StFulgence")
+fst_list$site2 <- stringr::str_replace(fst_list$site2, "QC.St-Fulgence", "QC.StFulgence")
+
+##linearize fst values
+fst_list$linweight <- (fst_list$weight/(1-fst_list$weight))
+fst_list$linunweight <- (fst_list$unweight/(1-fst_list$unweight))
+
+
+df.scalenv <- as.data.frame(scalenv)
+colnames(df.scalenv)  <- sites[,1]
+df.scalenv$site1 <- sites[,1]
+df.scalenv <- df.scalenv%>%
+  pivot_longer(!site1, names_to = "site2", values_to = "envDist")
+
+##Load site pairings
+sitePairs <-  read.table('input/sites.pairs.txt',sep="\t",header=T)
+##Final dataframe with all values in it
+df.dist.env.fst <- left_join(gdist.df, fst_list, by=c("site1", "site2")) %>% left_join(df.scalenv, by=c("site1", "site2"))
+df.dist.env.fst <- df.dist.env.fst %>% left_join(sitePairs, by=c("site1", "site2"))
+df.dist.env.fst <- df.dist.env.fst%>% drop_na()
+
+
+##Save colors to sites that are close to each other
+##Western blues 
+AB.cols <- brewer.pal(n = 9, name = "Blues")[c(4:6)]
+##Eastern oranges
+MB.col <-brewer.pal(n = 9, name = "Oranges")[2]
+##Eastern oranges
+MN.col <-brewer.pal(n = 12, name = "Set3")[4]
+##Eastern oranges
+NB.col<-brewer.pal(n = 11, name = "PuOr")[1]
+##Green
+NC.col<-brewer.pal(n = 9, name = "BuGn")[5]
+##Eastern oranges
+NH.col <-brewer.pal(n = 9, name = "Oranges")[4]
+##Eastern oranges
+NY.col <-brewer.pal(n = 9, name = "Oranges")[5]
+##Southern greens
+PA.cols <- brewer.pal(n = 9, name = "BuGn")[c(6:7)]
+##Eastern oranges
+QC.cols <-brewer.pal(n = 9, name = "Oranges")[c(6,7)]
+##Eastern oranges
+RI.col<-brewer.pal(n = 11, name = "RdGy")[4]
+##Eastern oranges
+WI.col<-brewer.pal(n = 11, name = "RdGy")[3]
+##Southern greens
+WV.col<-brewer.pal(n = 9, name = "BuGn")[4]
+
+
+##Save ind site colors
+pca.color <- c(AB.cols, MB.col, MN.col, NB.col, NC.col, NH.col, NY.col, PA.cols, QC.cols, RI.col, WI.col, WV.col)
+
+##Add colors for north-north, north-central, north-south, central-central, central-south, south-south pairs
+nn <-"#459762"
+nc <- "#89CFF0"
+ns <- "#FFBF00"
+cc <-"#f1c9cc"
+cs <-"#aa118f"
+ss <-"#3d4db1"
+sitePair.color <- c(cc,cs,nc,nn,ns, ss)
+
+##plot fst vs geographic dist
+plotgDistlinFST <- ggplot(df.dist.env.fst, aes(x=gdist, y=linunweight))+ 
+  geom_jitter(color="darkgray", alpha=0.8)+
+  scale_color_manual(values=pca.color)+
+  labs(title="Linearized FST vs Geographic Distance",
+        x ="Geographic distance (km)", y = "FST / (1 - FST)")+
+  geom_smooth(method=lm, level=0.95)+
+  theme_bw()
+plotgDistlinFST 
+##plot fst vs environmental dist
+plotenvDistlinFST <- ggplot(df.dist.env.fst, aes(x=envDist, y=linunweight))+ 
+  geom_jitter(color="darkgray", alpha=0.8)+
+  scale_color_manual(values=pca.color)+
+  labs(title="Linearized FST vs Environmental Distance",
+        x ="Scaled and Centered Environmental Distance", y = "FST / (1 - FST)")+
+  geom_smooth(method=lm, level=0.95)+
+  theme_bw()
+plotenvDistlinFST
+
+svg("results/plot.fst.geo.230203.svg")
+plotgDistlinFST 
+dev.off()
+svg("results/plot.fst.env.230203.svg")
+plotenvDistlinFST
+dev.off()
+
+##Now with paired colors
+##plot fst vs geographic dist
+plotgDistlinFST2 <- ggplot(df.dist.env.fst, aes(x=gdist, y=linunweight))+ 
+  geom_jitter(aes(color=sitepair))+
+  scale_color_manual(values=sitePair.color)+
+  labs(title="Linearized FST vs Geographic Distance",
+        x ="Geographic distance (km)", y = "FST / (1 - FST)")+
+  geom_smooth(method=lm, level=0.95)+
+  theme_bw()
+plotgDistlinFST2 
+##plot fst vs environmental dist
+plotenvDistlinFST2 <- ggplot(df.dist.env.fst, aes(x=envDist, y=linunweight))+ 
+  geom_jitter(aes(color=sitepair))+
+  scale_color_manual(values=sitePair.color)+
+  labs(title="Linearized FST vs Environmental Distance",
+        x ="Environmental Distance", y = "FST / (1 - FST)")+
+  geom_smooth(method=lm, level=0.95)+
+  theme_bw()
+plotenvDistlinFST2
+
+svg("results/plot.fst.geo.sitepairColor.230203.svg")
+plotgDistlinFST2 
+dev.off()
+svg("results/plot.fst.env.sitepairColor.230203.svg")
+plotenvDistlinFST2
+dev.off()
+
+```
+
+
+
+
+
+## Now to check what happens when you remove alberta 
+
+```{r mantel and partial mantel no AB}
+##Read in the weighted genetic distance
+sites<- read.table('input/site.txt',sep="\t",header=F)
+sites<- sites %>% filter(V1 != "ME.Dallas") %>% filter(V1 != "ON.ThunderBay") %>% filter(V1 != "AB.FortMacKay") %>% filter(V1 != "AB.FortMcMurray") %>% filter(V1 != "AB.SlaveLake")
+fst_pairAB<-read.table('matrices/linfst_unweighted.txt',sep="\t",header=T,row.names=1)
+fst_pair <- fst_pairAB[-c(1,2,3),-c(1,2,3)]
+rownames(fst_pair) <- sites[,1]
+fst_pair <- as.matrix(fst_pair)
+
+##Read in the geographic distance matrix
+gdist.AB<-read.table("matrices/cawa.geographicdist.matrix.txt",sep="\t",header=T,row.names=1)
+gdist<- gdist.AB[-c(1,2,3),-c(1,2,3)]
+gdist <- as.matrix(gdist)
+
+##Read in environmental distances
+scalenv.AB <- read.table('matrices/cawa.scalenvDist.tree.bio10.bio13.bio15.matrix.txt',sep="\t",header=T,row.names=1)
+scalenv<- scalenv.AB[-c(1,2,3),-c(1,2,3)]
+scalenv <- as.matrix(scalenv)
+
+## With only genetic and distance to test for only isolation by distance
+sink(file="results/noAB.mantel.xfst.ygdist.230203.txt")
+mantel(xdis = fst_pair, ydis= gdist, method="pearson")
+sink()
+
+## With only genetic and environment to test for only isolation by environment
+sink(file="results/noAB.mantel.xfst.yenvdist.230203.txt")
+mantel(xdis = fst_pair, ydis= scalenv, method="pearson")
+sink()
+
+##partial mantel to test isolation by distance when accounting for environment
+sink(file="results/noAB.pmantel.xfst.ygdist.zenvdist.230203.txt")
+mantel.partial( fst_pair,gdist,scalenv, method = "pearson", permutations = 999)
+sink()
+
+##partial mantel to test isolation by environment when accounting for distance
+sink(file="results/noAB.pmantel.xfst.yenvdist.zgdist.230203.txt")
+mantel.partial(fst_pair,scalenv,  gdist, method = "pearson", permutations = 999)
+sink()
+```
+
+
+
+```{r Graphing PWFST without AB}
+##Graph pairwise comparisons of linearized FST to geographic distance
+##A lot of manipulation to get the matrix values back into dataframes
+sites<- read.table('input/site.txt',sep="\t",header=F)
+sites<- sites %>% filter(V1 != "ME.Dallas") %>% filter(V1 != "ON.ThunderBay") %>% filter(V1 != "AB.FortMacKay") %>% filter(V1 != "AB.FortMcMurray") %>% filter(V1 != "AB.SlaveLake")
+
+##Read in the geographic distance matrix
+gdist.AB<-read.table("matrices/cawa.geographicdist.matrix.txt",sep="\t",header=T,row.names=1)
+gdist<- gdist.AB[-c(1,2,3),-c(1,2,3)]
+gdist <- as.matrix(gdist)
+
+colnames(gdist) <- sites[,1]
+gdist <- as.data.frame(gdist)
+gdist$site2 <- sites[,1]
+gdist.df<- gdist %>%
+  pivot_longer(!site2, names_to = "site1", values_to = "gdist")
+
+fst_list <-  read.table('input/linear.pw.fst.txt',sep="\t",header=T,row.names=1)  %>% filter(site1 != "AB.FortMacKay") %>% filter(site1 != "AB.FortMcMurray") %>% filter(site1 != "AB.SlaveLake") %>% filter(site2 != "AB.FortMacKay") %>% filter(site2 != "AB.FortMcMurray") %>% filter(site2 != "AB.SlaveLake")
+
+scalenv.AB <- read.table('matrices/cawa.scalenvDist.tree.bio10.bio13.bio15.matrix.txt',sep="\t",header=T,row.names=1)
+scalenv<- scalenv.AB[-c(1,2,3),-c(1,2,3)]
+df.scalenv <- as.data.frame(scalenv)
+df.scalenv$site1 <- sites[,1]
+df.scalenv <- df.scalenv%>%
+  pivot_longer(!site1, names_to = "site2", values_to = "envDist")
+
+##Final dataframe with all values in it
+df.dist.env.fst <- left_join(gdist.df, fst_list, by=c("site1", "site2")) %>% left_join(df.scalenv, by=c("site1", "site2"))
+df.dist.env.fst <- df.dist.env.fst %>% drop_na()
+
+
+##Save colors to sites that are close to each other
+##Eastern oranges
+MB.col <-brewer.pal(n = 9, name = "Oranges")[2]
+##Eastern oranges
+MN.col <-brewer.pal(n = 12, name = "Set3")[4]
+##Eastern oranges
+NB.col<-brewer.pal(n = 11, name = "PuOr")[1]
+##Green
+NC.col<-brewer.pal(n = 9, name = "BuGn")[5]
+##Eastern oranges
+NH.col <-brewer.pal(n = 9, name = "Oranges")[4]
+##Eastern oranges
+NY.col <-brewer.pal(n = 9, name = "Oranges")[5]
+##Southern greens
+PA.cols <- brewer.pal(n = 9, name = "BuGn")[c(6:7)]
+##Eastern oranges
+QC.cols <-brewer.pal(n = 9, name = "Oranges")[c(6,7)]
+##Eastern oranges
+RI.col<-brewer.pal(n = 11, name = "RdGy")[4]
+##Eastern oranges
+WI.col<-brewer.pal(n = 11, name = "RdGy")[3]
+##Southern greens
+WV.col<-brewer.pal(n = 9, name = "BuGn")[4]
+
+
+##Save colors
+pca.color <- c(MB.col, MN.col, NB.col, NC.col, NH.col, NY.col, PA.cols, QC.cols, RI.col, WI.col, WV.col)
+
+##plot fst vs geographic dist
+plotgDistlinFST <- ggplot(df.dist.env.fst, aes(x=gdist, y=linweight))+ 
+  geom_point(aes(color=site1))+
+  scale_color_manual(values=pca.color)+
+  labs(title="Linearized FST vs Geographic Distance, no Alberta",
+        x ="Geographic distance (km)", y = "FST / (1 - FST)")+
+  geom_smooth(method=lm, level=0.95)+
+  theme_bw()
+plotgDistlinFST 
+##plot fst vs environmental dist
+plotenvDistlinFST <- ggplot(df.dist.env.fst, aes(x=envDist, y=linweight))+ 
+  geom_point(aes(color=site1))+
+  scale_color_manual(values=pca.color)+
+  labs(title="Linearized FST vs Environmental Distance, no Alberta",
+        x ="Environmental Distance", y = "FST / (1 - FST)")+
+  geom_smooth(method=lm, level=0.95)+
+  theme_bw()
+plotenvDistlinFST
+
+pdf(file="results/noAB.plot.fst.geo.230203.pdf")
+plotgDistlinFST 
+dev.off()
+pdf(file="results/noAB.plot.fst.env.230203.pdf")
+plotenvDistlinFST
+dev.off()
+
+```

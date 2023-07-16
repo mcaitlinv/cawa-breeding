@@ -1,0 +1,160 @@
+---
+title: "EEMS-cawa"
+author: "Caitlin Miller"
+date: '2022-11-26'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#remotes::install_github('dipetkov/eems/plotting/rEEMSplots', build=T)
+library(rEEMSplots)
+library(raster)  # important to load before tidyverse, otherwise it masks select()
+library(tidyverse)
+library(sf)
+library(ggspatial)
+library(ggplot2)
+library(readxl)
+```
+
+## Using EEMS
+
+Using the filtered imputed vcf with platform effects removed, but not removing variants in LD to generate eems data.
+
+```{r graphics for 654226 snps from filtered dataset}
+mcmcpath ="input/cawa-imputed-nInd169-nSites654226-EEMS-nDemes200/"
+plotpath = "plots/cawa-imputed-nInd169-nSites654226-EEMS-nDemes200"
+
+eems.plots(mcmcpath, plotpath, longlat = TRUE,out.png=FALSE )
+```
+
+## Get the raster of migration rates from eems output
+```{r get rasters}
+load("./plots/cawa-imputed-nInd169-nSites654226-EEMS-nDemes200-rdist.RData")
+
+##Make a dataframe from migration values
+df.mig <- as.data.frame(xym.values)
+
+##Tranform dataframe to raster
+migrationRates <- raster::rasterFromXYZ(df.mig)
+##Add CRS
+proj4string(migrationRates) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+#Check raster
+plot(migrationRates)
+##Crop to breeding range
+breeding_range <- st_read("../../cawa-range-map/map/cawa.breed.sf.WGS84.Ebird.simplifiedQGIS.shp")
+crop <- crop(migrationRates, breeding_range)
+mask <- mask(crop, breeding_range)
+
+##Scale migration rates so 0 is clear
+mask.df <- as.data.frame(mask, xy = TRUE, na.rm=T) 
+
+scaledMask <- mask.df %>%
+  ggplot() +
+  geom_raster(aes(x, y, fill = m, alpha=abs(m))) +
+  scale_fill_stepsn(colors=c('#b2182b','#ef8a62','#fddbc7',
+                             '#f7f7f7','#d1e5f0','#67a9cf','#2166ac'),
+             n.breaks=9, limits=c(-2,2), show.limits=T)+
+  geom_sf(data=breeding_range, fill =NA) +
+  scale_alpha_continuous(range=c(0.5, 1))
+
+
+sampled <- read.delim("../../cawa_seq_locations.txt")
+us <- ggplot2::map_data(map = "usa")
+can <- ggplot2::map_data(map = "world", region = "canada")
+
+
+mapg <- scaledMask   +
+  geom_polygon(data = us, aes(x = long, y = lat, group = group), fill = NA, color = "darkgrey") +
+  geom_polygon(data = can, aes(x = long, y = lat, group = group), fill = NA, color = "darkgrey") +
+  geom_point(data=sampled, aes(x = long, y=lat), color="black", size =1.5)+
+  geom_sf(data=breeding_range, fill =NA, color = "darkgrey")+ 
+  coord_sf(xlim = c(-128, -55), ylim = c(30, 61), expand = FALSE, crs=4326)+
+  theme_bw()
+  
+
+
+mapg
+
+
+svg("output/eems.migration.range.map.svg")
+mapg
+dev.off()
+pdf("output/eems.migration.range.map.pdf")
+mapg
+dev.off()
+```
+
+
+
+
+
+## Using EEMS with LD removed
+
+Using the filtered imputed vcf with platform effects removed and LD removed
+
+```{r graphics for 654226 snps from filtered dataset}
+mcmcpath ="input/cawa-imputed-nInd169-nSitesLDRemove451571-EEMS-nDemes200/"
+plotpath = "plots/cawa-imputed-nInd169-nSitesLDRemove451571-EEMS-nDemes200"
+
+eems.plots(mcmcpath, plotpath, longlat = TRUE,out.png=FALSE )
+```
+
+## Get the raster of migration rates from eems output
+```{r get rasters}
+load("./plots/cawa-imputed-nInd169-nSitesLDRemove451571-EEMS-nDemes200-rdist.RData")
+
+##Make a dataframe from migration values
+df.mig <- as.data.frame(xym.values)
+
+##Tranform dataframe to raster
+migrationRates <- raster::rasterFromXYZ(df.mig)
+##Add CRS
+proj4string(migrationRates) <- CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0")
+#Check raster
+plot(migrationRates)
+##Crop to breeding range
+breeding_range <- st_read("../../cawa-range-map/map/cawa.breed.sf.WGS84.Ebird.simplifiedQGIS.shp")
+crop <- crop(migrationRates, breeding_range)
+mask <- mask(crop, breeding_range)
+
+##Scale migration rates so 0 is clear
+mask.df <- as.data.frame(mask, xy = TRUE, na.rm=T) 
+
+scaledMask <- mask.df %>%
+  ggplot() +
+  geom_raster(aes(x, y, fill = m, alpha=abs(m))) +
+  scale_fill_stepsn(colors=c('#b2182b','#ef8a62','#fddbc7',
+                             '#f7f7f7','#d1e5f0','#67a9cf','#2166ac'),
+             n.breaks=9, limits=c(-2,2), show.limits=T)+
+  geom_sf(data=breeding_range, fill =NA) +
+  scale_alpha_continuous(range=c(0.5, 1))
+
+
+sampled <- read.delim("../../cawa_seq_locations.txt")
+us <- ggplot2::map_data(map = "usa")
+can <- ggplot2::map_data(map = "world", region = "canada")
+
+
+mapg <- scaledMask   +
+  geom_polygon(data = us, aes(x = long, y = lat, group = group), fill = NA, color = "darkgrey") +
+  geom_polygon(data = can, aes(x = long, y = lat, group = group), fill = NA, color = "darkgrey") +
+  geom_point(data=sampled, aes(x = long, y=lat), color="black", size =1.5)+
+  geom_sf(data=breeding_range, fill =NA, color = "darkgrey")+ 
+  coord_sf(xlim = c(-128, -55), ylim = c(30, 61), expand = FALSE, crs=4326)+
+  theme_bw()
+  
+
+
+mapg
+
+
+svg("output/eems.migration.range.map.230207.svg")
+mapg
+dev.off()
+pdf("output/eems.migration.range.map.230207.pdf")
+mapg
+dev.off()
+```
+
+
+
