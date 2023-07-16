@@ -37,6 +37,7 @@ Scripts:
   3) [get.mergevcfs.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/get.fstvcf.sbatch)
   4) [get.fstFilter.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/get.fstFilter.sbatch)
   5) [get.fstvcf.sbatch](https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/get.fstvcf.sbatch)
+
 After finding platform effects, I decided to split samples that were run on both platforms into platform-based bams, then find FST values within each sample. The logic being that the same individuals would have highest FST values based on platform differences. 
 
   - I split bams using `samtools split`, then processed bams using GATK with 2Mb section to find variants. 

@@ -1,0 +1,472 @@
+---
+title: "Admixture for genoscape"
+author: "Caitlin Miller"
+date: "11/30/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=F, warning=F, results=F)
+library(readr)
+library(ggplot2)
+library(tidyverse)
+library(gridExtra)
+# library(remotes)
+# remotes::install_github("https://github.com/royfrancis/pophelper")
+library(pophelper)
+library(gdata)
+library(readxl)
+require(plyr)
+```
+
+## Using admxiture to estimate K
+
+### Getting CV values, then graphing
+
+Check plot of CV to look for most promising K
+
+```{r find K, eval=T}
+##Load values
+cv <- read_table("input/CV.error", col_names = FALSE)
+colnames(cv) <- c("run", "k", "cvErr")
+
+##Get summary data
+data_summary <- function(data, varname, groupnames){
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+df2 <- data_summary(cv, varname="cvErr",  groupnames=c("k"))
+df2 <- df2[-9,]
+##graph values 
+p<- ggplot(df2, aes(x=k, y=cvErr)) + 
+  geom_line() +
+  geom_point()+
+  geom_errorbar(aes(ymin=cvErr-sd, ymax=cvErr+sd), width=.2,
+                 position=position_dodge(.9)) +
+  scale_x_discrete(name="K",limits=c("1", "2", "3", "4", "5", "6"))
+# Finished bar plot
+cvPlot<- p+labs(title="CV Errror per K value", y = "CV Error")+
+   theme_bw() 
+
+svg(file="results/cawa.admix.cvErr.221123.svg")
+cvPlot
+dev.off()
+
+pdf(file="results/cawa.admix.cvErr.221123.pdf")
+cvPlot
+dev.off()
+```
+
+It appears the best K is 1. The next best K appears to be 2.
+
+```{r get data and add labels for adaptive, include=F}
+
+##Select files
+list <- list.files(".", pattern='cawa.bqsr.miss0.2.qual30.1X.fst85.imputeAll.gl.noIndel.noRdaPlat.', recursive=T)
+slist <- readQ(files=list,filetype="basic",indlabfromfile=F)
+
+# check class of ouput
+class(slist)
+# view head of first converted file
+head(slist[[1]])
+attributes(slist)
+
+##Check to make sure it looks correct
+head(tabulateQ(slist),writetable=T)
+summariseQ(tabulateQ(slist),writetable=T, exportpath=getwd())
+
+#The rownames of ‘qlist’ can also be modified by the user by adding custom individual labels.
+meta<-read_excel("../cawa_seq_metadata.xlsx")
+meta$regions <- meta$group
+inds <- meta$sample
+
+# add indlab to one run
+rownames(slist[[1]]) <- inds
+# if all runs are equal length, add indlab to all runs
+if(length(unique(sapply(slist,nrow)))==1) slist <- lapply(slist,"rownames<-",inds)
+# show row names of all runs and all samples
+#lapply(slist, rownames)
+
+```
+
+
+
+```{r plot the multiple runs of admixture, eval=T}
+
+
+p2rm<-plotQ(alignK(slist[c(2,8,14,20,26)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 2",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+p3rm<-plotQ(alignK(slist[c(3,9,15,21,27)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 3",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+p4rm<-plotQ(alignK(slist[c(4,10,16,22,28)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 4",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+p5rm<-plotQ(alignK(slist[c(5,11,17,23,29)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 5",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+p6rm<-plotQ(alignK(slist[c(6,12,18,24,30)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 6",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+
+svg("results/cawa.admix.K2-6.5runs.svg")
+grid.arrange(p2rm$plot[[1]],p3rm$plot[[1]],p4rm$plot[[1]],p5rm$plot[[1]],p6rm$plot[[1]], cvPlot, layout_matrix=matrix(c(1,2,3,4,5,6),ncol=2,byrow=T))
+dev.off()
+
+pdf("results/cawa.admix.K2-6.5runs.pdf",useDingbats = F)
+grid.arrange(p2rm$plot[[1]],p3rm$plot[[1]],p4rm$plot[[1]],p5rm$plot[[1]],p6rm$plot[[1]], cvPlot, layout_matrix=matrix(c(1,2,3,4,5,6),ncol=2,byrow=T))
+dev.off()
+
+grid.arrange(p2rm$plot[[1]],p3rm$plot[[1]],p4rm$plot[[1]],p5rm$plot[[1]],p6rm$plot[[1]], cvPlot, layout_matrix=matrix(c(1,2,3,4,5,6),ncol=2,byrow=T))
+
+```
+
+
+```{r plot the multiple runs of admixture for svgs, eval=T}
+
+p2allrm<-plotQ(alignK(slist[c(14,15, 16, 17, 28)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=F,splab=c("K = 2","K = 3","K = 4","K = 5","K = 6"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+p3<-plotQ(alignK(slist[c(15)]),grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=F,splab=c("K = 3"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+
+pdf("results/cawa.admix.K2-6.221123.pdf",useDingbats = F)
+grid.arrange(p2allrm$plot[[1]], cvPlot, layout_matrix=matrix(c(1,2),ncol=2,byrow=T))
+dev.off()
+
+svg("results/cawa.admix.K2-6.221114.svg")
+grid.arrange(p2allrm$plot[[1]], cvPlot, layout_matrix=matrix(c(1,2),ncol=2,byrow=T))
+dev.off()
+
+pdf("results/cawa.admix.K3.221114.pdf",useDingbats = F)
+grid.arrange(p3$plot[[1]],  layout_matrix=matrix(c(1,1),ncol=1,byrow=T))
+dev.off()
+svg("results/cawa.admix.K3.221114.svg")
+grid.arrange(p3$plot[[1]],  layout_matrix=matrix(c(1,1),ncol=1,byrow=T))
+dev.off()
+```
+
+
+
+## Now let's plot using ALL adaptive loci
+
+## Check plot of CV to look for most promising K
+
+
+```{r find all adapt K}
+##Load values
+cv <- read_table("adaptInput/CV.error", col_names = FALSE)
+colnames(cv) <- c("run", "k", "cvErr")
+
+##Get summary data
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+df2 <- data_summary(cv, varname="cvErr", 
+                    groupnames=c("k"))
+df2 <- df2[-9,]
+##graph values 
+p<- ggplot(df2, aes(x=k, y=cvErr)) + 
+  geom_line() +
+  geom_point()+
+  geom_errorbar(aes(ymin=cvErr-sd, ymax=cvErr+sd), width=.2,
+                 position=position_dodge(.9)) +
+  scale_x_discrete(name="K",limits=c("1", "2", "3", "4", "5", "6", "7", "8"))
+# Finished bar plot
+cvPlot<- p+labs(title="CV Errror per K value", y = "CV Error")+
+   theme_bw() 
+
+svg(file="results/cawa.adapt.cvErr.svg")
+cvPlot
+dev.off()
+
+pdf(file="results/cawa.adapt.cvErr.pdf")
+cvPlot
+dev.off()
+```
+
+It appears the best K is 3. The next best K appears to be 4.
+
+```{r get data and add labels for all adapt, include=F}
+
+##Select files
+list <- list.files(".", pattern='cawa.adapt.all.221123.run', recursive=T)
+slist <- readQ(files=list,filetype="basic",indlabfromfile=F)
+
+# check class of ouput
+class(slist)
+# view head of first converted file
+head(slist[[1]])
+attributes(slist)
+
+##Check to make sure it looks correct
+head(tabulateQ(slist),writetable=T)
+summariseQ(tabulateQ(slist),writetable=T, exportpath=getwd())
+
+#The rownames of ‘qlist’ can also be modified by the user by adding custom individual labels.
+meta<-read_excel("../cawa_seq_metadata.xlsx")
+meta <- dplyr::rename(meta, regions = group)
+inds <- meta$sample
+# add indlab to one run
+rownames(slist[[1]]) <- inds
+# if all runs are equal length, add indlab to all runs
+if(length(unique(sapply(slist,nrow)))==1) slist <- lapply(slist,"rownames<-",inds)
+# show row names of all runs and all samples
+#lapply(slist, rownames)
+
+```
+
+
+
+```{r plot the multiple runs of admixture for all adapt}
+
+p3<-plotQ(alignK(slist[c(3)]),grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=F,splab=c("K = 3"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+svg(file="results/cawa.adapt.K3.svg")
+grid.arrange(p3$plot[[1]], layout_matrix=matrix(c(1,1),byrow=T))
+dev.off()
+
+p2rm<-plotQ(alignK(slist[c(2,10,18,26,34)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 2",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+p3rm<-plotQ(alignK(slist[c(3,11,19,27,35)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 3",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+p4rm<-plotQ(alignK(slist[c(4,12,20,28,36)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 4",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+p5rm<-plotQ(alignK(slist[c(5,13,21,29,37)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 5",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+
+p6rm<-plotQ(alignK(slist[c(6,14,22,30,38)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 6",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+p2allrm<-plotQ(alignK(slist[c(18,19,20,21, 22)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=F,splab=c("K = 2","K = 3","K = 4","K = 5","K = 6"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+svg("results/cawa.admix.adapt.all.K2-6.5runs.svg")
+grid.arrange(p2allrm$plot[[1]])
+dev.off()
+
+pdf("results/cawa.admix.adapt.all.K2-6.5runs.pdf",useDingbats = F)
+grid.arrange(p2rm$plot[[1]],p3rm$plot[[1]],p4rm$plot[[1]],p5rm$plot[[1]],p6rm$plot[[1]], cvPlot, layout_matrix=matrix(c(1,2,3,4,5,6),ncol=2,byrow=T))
+dev.off()
+grid.arrange(p2rm$plot[[1]],p3rm$plot[[1]],p4rm$plot[[1]],p5rm$plot[[1]],p6rm$plot[[1]], cvPlot, layout_matrix=matrix(c(1,2,3,4,5,6),ncol=2,byrow=T))
+
+
+```
+
+##checking for high-grading bias in adaptive loci
+
+Ran 5 sets of 100 random individuals to see if pop structure is the same when only some individuals used.
+
+```{r find highgraded adapt CV err, eval =F}
+##Load values
+cv <- read_table("inputAdaptHighGrade/CV.err", col_names = FALSE)
+colnames(cv) <- c("Randomization", "k", "cvErr")
+
+##Get summary data
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+df2 <- data_summary(cv, varname="cvErr", 
+                    groupnames=c("k"))
+df2 <- df2[-9,]
+##graph values 
+p<- ggplot(df2, aes(x=k, y=cvErr)) + 
+  geom_line() +
+  geom_point()+
+  geom_errorbar(aes(ymin=cvErr-sd, ymax=cvErr+sd), width=.2,
+                 position=position_dodge(.9)) +
+  scale_x_discrete(name="K",limits=c("1", "2", "3", "4", "5", "6", "7", "8"))
+# Finished bar plot
+cvPlot<- p+labs(title="CV Errror per K value", y = "CV Error")+
+   theme_bw() 
+```
+
+Best CV error still looks to be 3, with 5 sets of randomized 100 samples.
+
+```{r get data and add labels to the highgrade samples, eval =F}
+
+##Select files
+list <- list.files(".", pattern='cawa.adapt.highgrade', recursive=T)
+slist <- readQ(files=list,filetype="basic",indlabfromfile=F)
+
+# check class of ouput
+class(slist)
+# view head of first converted file
+head(slist[[1]])
+attributes(slist)
+
+##Check to make sure it looks correct
+head(tabulateQ(slist),writetable=T)
+summariseQ(tabulateQ(slist),writetable=T, exportpath=getwd())
+
+#The rownames of ‘qlist’ can also be modified by the user by adding custom individual labels.
+meta<-read_excel("../cawa_seq_metadata.xlsx")
+meta <- dplyr::rename(meta, regions = group)
+
+inds1 <- read_delim("inputAdaptHighGrade/adapt.highgrade.1.100.ped", delim=' ', col_names=F) %>% select(X1)
+inds2 <- read_delim("inputAdaptHighGrade/adapt.highgrade.2.100.ped", delim=' ', col_names=F) %>% select(X1)
+inds3 <- read_delim("inputAdaptHighGrade/adapt.highgrade.3.100.ped", delim=' ', col_names=F) %>% select(X1)
+inds4 <- read_delim("inputAdaptHighGrade/adapt.highgrade.4.100.ped", delim=' ', col_names=F) %>% select(X1)
+inds5 <- read_delim("inputAdaptHighGrade/adapt.highgrade.5.100.ped", delim=' ', col_names=F) %>% select(X1)
+
+# add indlab to each group of run
+for(x in 1:8) {
+  rownames(slist[[x]]) <- inds1$X1
+}
+for(x in 9:16) {
+  rownames(slist[[x]]) <- inds2$X1
+}
+for(x in 17:24) {
+  rownames(slist[[x]]) <- inds3$X1
+}
+for(x in 25:32) {
+  rownames(slist[[x]]) <- inds4$X1
+}
+for(x in 33:40) {
+  rownames(slist[[x]]) <- inds5$X1
+}
+
+
+# show row names of all runs and all samples
+
+#lapply(slist, rownames)
+
+```
+
+
+```{r plot the multiple runs of admixture for high grading, eval =F}
+meta1 <- meta %>% filter(sample %in% inds1$X1)
+
+run1 <-plotQ(alignK(slist[c(1,2,3,4,5,6,7,8)]),imgoutput="join",grplab=data.frame(labs=meta1$state, loc=as.character(meta1$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"),splab=c("K=1","K=2","K=3","K=4","K=5","K=6","K=7","K=8"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+meta2 <- meta %>% filter(sample %in% inds2$X1)
+
+run2 <-plotQ(alignK(slist[c(9,10,11,12,13,14,15,16)]),imgoutput="join",grplab=data.frame(labs=meta2$state, loc=as.character(meta2$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"),splab=c("K=1","K=2","K=3","K=4","K=5","K=6","K=7","K=8"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+
+meta3 <- meta %>% filter(sample %in% inds3$X1)
+
+run3 <-plotQ(alignK(slist[c(17,18,19,20,21,22,23,24)]),imgoutput="join",grplab=data.frame(labs=meta3$state, loc=as.character(meta3$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"),splab=c("K=1","K=2","K=3","K=4","K=5","K=6","K=7","K=8"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+
+meta4 <- meta %>% filter(sample %in% inds4$X1)
+
+run4 <-plotQ(alignK(slist[c(25,26,27,28,29,30,31,32)]),imgoutput="join",grplab=data.frame(labs=meta4$state, loc=as.character(meta4$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"),splab=c("K=1","K=2","K=3","K=4","K=5","K=6","K=7","K=8"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+meta5 <- meta %>% filter(sample %in% inds5$X1)
+
+run5 <-plotQ(alignK(slist[c(33,34,35,36,37,38,39,40)]),imgoutput="join",grplab=data.frame(labs=meta5$state, loc=as.character(meta5$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"),splab=c("K=1","K=2","K=3","K=4","K=5","K=6","K=7","K=8"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+
+
+pdf("results/admix.adapt.highgrading.K1-8.5runs.pdf",useDingbats = F)
+grid.arrange(run1$plot[[1]],run2$plot[[1]],run3$plot[[1]],run4$plot[[1]],run5$plot[[1]], cvPlot, layout_matrix=matrix(c(1,2,3,4,5,6),ncol=2,byrow=T))
+dev.off()
+grid.arrange(run1$plot[[1]],run2$plot[[1]],run3$plot[[1]],run4$plot[[1]],run5$plot[[1]], cvPlot, layout_matrix=matrix(c(1,2,3,4,5,6),ncol=2,byrow=T))
+```
+
+
+## Plotting admixture of neutral loci
+## Check plot of CV to look for most promising K
+
+```{r neutral K CV errs}
+##Load values
+cv <- read_table("neutralInput/CV.error", col_names = FALSE)
+colnames(cv) <- c("run", "k", "cvErr")
+
+##Get summary data
+data_summary <- function(data, varname, groupnames){
+  require(plyr)
+  summary_func <- function(x, col){
+    c(mean = mean(x[[col]], na.rm=TRUE),
+      sd = sd(x[[col]], na.rm=TRUE))
+  }
+  data_sum<-ddply(data, groupnames, .fun=summary_func,
+                  varname)
+  data_sum <- rename(data_sum, c("mean" = varname))
+ return(data_sum)
+}
+df2 <- data_summary(cv, varname="cvErr", 
+                    groupnames=c("k"))
+df2 <- df2[-9,]
+##graph values 
+p<- ggplot(df2, aes(x=k, y=cvErr)) + 
+  geom_line() +
+  geom_point()+
+  geom_errorbar(aes(ymin=cvErr-sd, ymax=cvErr+sd), width=.2,
+                 position=position_dodge(.9)) +
+  scale_x_discrete(name="K",limits=c("1", "2", "3", "4", "5", "6"))
+# Finished bar plot
+cvPlot<- p+labs(title="CV Errror per K value", y = "CV Error")+
+   theme_bw() 
+```
+
+
+It appears the best K is 1.
+
+```{r get data and add labels neutral loci, include=F}
+
+##Select files
+list <- list.files(".", pattern='neutral.cawa.bqsr.miss0.2.qual30.1X.fst85.imputeAll.gl.noIndel.noRdaPlatform.run', recursive=T)
+slist <- readQ(files=list,filetype="basic",indlabfromfile=F)
+
+# check class of ouput
+class(slist)
+# view head of first converted file
+head(slist[[1]])
+attributes(slist)
+
+##Check to make sure it looks correct
+head(tabulateQ(slist),writetable=T)
+summariseQ(tabulateQ(slist),writetable=T, exportpath=getwd())
+
+#The rownames of ‘qlist’ can also be modified by the user by adding custom individual labels.
+meta<-read_excel("../cawa_seq_metadata.xlsx")
+meta <- dplyr::rename(meta, regions = group)
+inds <- meta$sample
+# add indlab to one run
+rownames(slist[[1]]) <- inds
+# if all runs are equal length, add indlab to all runs
+if(length(unique(sapply(slist,nrow)))==1) slist <- lapply(slist,"rownames<-",inds)
+# show row names of all runs and all samples
+#lapply(slist, rownames)
+
+```
+
+
+```{r plot the multiple runs of neutral loci}
+
+p2rm<-plotQ(alignK(slist[c(2,8,14,20,26)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 2",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+p3rm<-plotQ(alignK(slist[c(3,9,15,21,27)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 3",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+p4rm<-plotQ(alignK(slist[c(4,10,16,22,28)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 3",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+p5rm<-plotQ(alignK(slist[c(5,11,17,23,29)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 5",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+
+p6rm<-plotQ(alignK(slist[c(6,12,18,24,30)]),imgoutput="join",grplab=data.frame(labs=meta$state, loc=as.character(meta$regions)), subsetgrp= c("AB", "MB", "MN", "ON", "WI", "QC", "NB", "ME", "NH", "NY","RI", "PA", "WV", "NC"), showtitle=T, titlelab="K = 6",titlesize=25,splab=c("Run 1","Run 2","Run 3","Run 4","Run 5"), returnplot=T,exportplot=F,ordergrp=T,grplabsize=2,linesize=0.5,pointsize=2,grplabangle=90,grplabheight = 14)
+
+
+
+pdf("results/cawa.neutral.K2-6.5runs.230126.pdf",useDingbats = F)
+grid.arrange(p2rm$plot[[1]],p3rm$plot[[1]],p4rm$plot[[1]],p5rm$plot[[1]],p6rm$plot[[1]], cvPlot, layout_matrix=matrix(c(1,2,3,4,5,6),ncol=2,byrow=T))
+dev.off()
+grid.arrange(p2rm$plot[[1]],p3rm$plot[[1]],p4rm$plot[[1]],p5rm$plot[[1]],p6rm$plot[[1]], cvPlot, layout_matrix=matrix(c(1,2,3,4,5,6),ncol=2,byrow=T))
+
+```
