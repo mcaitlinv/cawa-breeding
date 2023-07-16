@@ -10,7 +10,7 @@ conservation units in the Canada Warbler (*Cardellina canadensis*).
 3.  Postprocessing
 4.  Evolutionarily significant unit analysis
 5.  Adaptive unit analysis
-6.  Management unit analysis
+6.  Gradient forest analysis
 
 Supercomputing acknowledgements: \> This work utilized the Summit
 supercomputer, which is supported by the National Science Foundation
