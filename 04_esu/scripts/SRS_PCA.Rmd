@@ -1,0 +1,370 @@
+---
+title: "SRS_PCA"
+author: "Caitlin Miller"
+date: "07/05/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#remotes::install_github("eriqande/srsStuff", upgrade = FALSE)
+library(srsStuff)
+library(tidyverse)
+library(readxl)
+library(RColorBrewer)
+```
+
+
+## Covariance analysis
+
+```{r manipulate data}
+##Did this bit on cluster with runR.sbatch and srs.input.R script
+# snames <- read_lines("samples1X.list")
+#CAWA.filt<-srs_covar(file="copy/cawa.bqsr.miss0.2.qual30.1X.fst85.filtRda.recode.AD.txt", sample_names=snames, freq_thresh = 0)
+#saveRDS(CAWA.filt, "copy/cawa.srs.filt.85fst.RDA.rds")
+
+allCAWA <- readRDS("cawa.srs.filt.85fst.RDA.rds")
+```
+
+Incorporate the meta data
+
+```{r}
+meta<-read_excel("../cawa_seq_metadata.xlsx")
+meta <- meta %>% dplyr::select(sample,group,site,sex, type,cov, plate, merged, year, platform) %>% rename(vcf_name=sample,Region_site=group,Region_pop=site, sex=sex, cov=cov,plate=plate,merged=merged, year=year, platform=platform)
+meta$cov <- round(meta$cov, 0)
+
+```
+
+Next to create the matrix \# A function from Eric to get everything prepped and tidy
+
+```{r prepoutput function}
+prep_output <- function(A) {
+
+  # first for each individual i, get the number of sites at which
+  # that individual had a read and also another individual, j, averaged
+  # over all j.  This tells us on average how many markers went into
+  # compute the covariance for each individual.
+  m <- A$M
+  diag(m) <- 0
+  ave_sites <- tibble(
+    vcf_name = A$sample_names,
+    ave_sites = rowMeans(m) * ncol(m) / (ncol(m) - 1)
+  )
+
+  # do the whole eigendecomposition on the standard covariance matrix.
+  eig <- eigen(A$Cov)
+  colnames(eig$vectors) <- sprintf("PC-%02d", 1:ncol(eig$vectors))
+
+
+  pca_tib <- as_tibble(eig$vectors[,1:6]) %>%
+    mutate(vcf_name = A$sample_names) %>%
+    dplyr::select(vcf_name, everything())
+
+  pca_long <- pca_tib %>%
+    tidyr::gather(., key = "PC", "val", -vcf_name)
+
+  # then expand a grid of the possible comparisons (ordered)
+  pca_pairs <- expand.grid(vcf_name = pca_tib$vcf_name,
+                           PCx = sprintf("PC-%02d", 1:6),
+                           PCy = sprintf("PC-%02d", 1:6),
+                           stringsAsFactors = FALSE) %>%
+    tibble::as_tibble() %>%
+    dplyr::left_join(., pca_long, by = c("vcf_name", "PCx" = "PC")) %>%
+    dplyr::rename(val_x = val) %>%
+    dplyr::left_join(pca_long, by = c("vcf_name", "PCy" = "PC")) %>%
+    dplyr::rename(val_y = val)  %>%
+    left_join(ave_sites, by = "vcf_name") %>%
+    left_join(meta, by = "vcf_name")
+
+  WaG <- (A$IBS - A$Mt_S) / (1 - A$Mt_S)
+  eig <- eigen(WaG)
+  colnames(eig$vectors) <- sprintf("PC-%02d", 1:ncol(eig$vectors))
+
+
+  pca_tib <- as_tibble(eig$vectors[,1:6]) %>%
+    mutate(vcf_name = A$sample_names) %>%
+    dplyr::select(vcf_name, everything())
+
+  pca_long <- pca_tib %>%
+    tidyr::gather(., key = "PC", "val", -vcf_name)
+
+  pcp <- expand.grid(vcf_name = pca_tib$vcf_name,
+                     PCx = sprintf("PC-%02d", 1:6),
+                     PCy = sprintf("PC-%02d", 1:6),
+                     stringsAsFactors = FALSE) %>%
+    tibble::as_tibble() %>%
+    dplyr::left_join(., pca_long, by = c("vcf_name", "PCx" = "PC")) %>%
+    dplyr::rename(WaG_x = val) %>%
+    dplyr::left_join(pca_long, by = c("vcf_name", "PCy" = "PC")) %>%
+    dplyr::rename(WaG_y = val)
+
+  # then join those both and return them
+  left_join(pcp, pca_pairs,
+            by = c("vcf_name", "PCx", "PCy"))
+}
+```
+
+##CAWA Breeding Site Analysis
+
+```{r get data arranged and colors sorted}
+breedingCAWA.prep <- prep_output(allCAWA)
+factor.levels <- sort(c(unique(meta$Region_pop)))
+                   
+breedingCAWA.prep$Region_pop <- factor(x = breedingCAWA.prep$Region_pop,
+                                   levels = factor.levels)
+
+breedingCAWA.prep <- arrange(breedingCAWA.prep, Region_pop)
+
+##Save colors to sites that are close to each other
+##Western blues 
+AB.cols <- brewer.pal(n = 9, name = "Blues")[c(4:6)]
+##Eastern oranges
+MB.col <-brewer.pal(n = 9, name = "Oranges")[2]
+##Eastern oranges
+ME.col <-brewer.pal(n = 9, name = "Oranges")[3]
+##Eastern oranges
+MN.col <-brewer.pal(n = 12, name = "Set3")[4]
+##Eastern oranges
+NB.col<-brewer.pal(n = 11, name = "PuOr")[1]
+##Pink
+NC.col<-brewer.pal(n = 8, name = "Dark2")[4]
+##Eastern oranges
+NH.col <-brewer.pal(n = 9, name = "Oranges")[4]
+##Eastern oranges
+NY.col <-brewer.pal(n = 9, name = "Oranges")[5]
+##Eastern oranges
+ON.col <-brewer.pal(n = 9, name = "Oranges")[5]
+##Southern greens
+PA.cols <- brewer.pal(n = 9, name = "BuGn")[c(6:7)]
+##Eastern oranges
+QC.cols <-brewer.pal(n = 9, name = "Oranges")[c(6,7)]
+##Eastern oranges
+RI.col<-brewer.pal(n = 9, name = "Oranges")[8]
+##Eastern oranges
+WI.col<-brewer.pal(n = 11, name = "RdGy")[3]
+##Southern greens
+WV.col<-brewer.pal(n = 9, name = "BuGn")[4]
+
+
+##Save colors
+pca.color <- c(AB.cols, MB.col, ME.col, MN.col, NB.col, NC.col, NH.col, NY.col, ON.col, PA.cols, QC.cols, RI.col, WI.col, WV.col)
+
+```
+
+##Initial Plots Facet grid:
+
+```{r graph PCs by different potential influences}
+subsetBreedingCAWA.prep <- breedingCAWA.prep %>% filter(PCx == c("PC-01", "PC-01", "PC-03")) %>%  filter(PCy == c( "PC-02", "PC-03"))
+
+
+bp <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = Region_pop))+
+  facet_grid(PCy ~ PCx) +
+  scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+bp
+
+isotopeGroup <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = as.factor(Region_site)))+
+  facet_grid(PCy ~ PCx) +
+  scale_color_manual(values = c("green", "orange", "purple")) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+isotopeGroup
+
+sex <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = sex))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+sex
+
+plate <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = as.factor(plate)))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+plate
+
+platform <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = platform))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+platform
+
+type <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = type))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+type
+
+year <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = year))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+year
+
+cov <- ggplot(subsetBreedingCAWA.prep, aes(x = val_x, y = val_y, color = as.factor(cov)))+
+  facet_grid(PCy ~ PCx) +
+  #scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(legend.key.size = unit(0.1, "cm"))
+  
+cov
+```
+
+##Figure out which indivduals, if any, to remove
+
+```{r find the covariance of all inds}
+cov_and_M <- function(A) {
+  tibble(vcf_name_1 = rep(A$sample_names, times = nrow(A$Cov)),
+         vcf_name_2 = rep(A$sample_names, each = ncol(A$Cov)),
+         covar = as.vector(A$Cov),
+         M = as.vector(A$M),
+         WaG = as.vector((A$IBS - A$Mt_S) / (1 - A$Mt_S))
+  )
+}
+
+CM <- cov_and_M(allCAWA)
+
+CM_cut <- CM %>%
+  filter(vcf_name_1 < vcf_name_2) %>%
+  arrange(desc(M)) %>%
+  mutate(m_group = cut(M, breaks = c(0, 1e6, 5e6, 1e7, 1e8, 2e8)))
+
+
+g <- ggplot(CM_cut, aes(x = covar, y = 2, colour = log10(M), size = 3)) +
+  geom_jitter(width = 0, height = 1) +
+  scale_colour_viridis_c() +
+  facet_wrap(~m_group, ncol = 1) +
+  theme_bw()
+
+g
+```
+
+Save file.
+
+```{r save the plot of covariance}
+ggsave(g, filename = "plots/cawa-filt85fstRDA-missing-covar-and-M-facets.pdf",
+      width = 20, height = 20)
+```
+
+##Create table to individuals to remove. Choose the covariance cut off that works for your data. I choose \>0.1
+
+```{r Find individuals with covariance >0.1}
+outlier_CM_cut <- CM_cut %>% 
+  filter(covar > 0.1)
+outlier_covar <- unique(c(unique(outlier_CM_cut$vcf_name_1), unique(outlier_CM_cut$vcf_name_2)))
+
+
+meta[meta$vcf_name %in% outlier_covar,]
+```
+
+There are no individuals to remove with covariance \>0.1, so I will not change anything
+
+## PCs 1 and 2
+
+```{r check PC1 and PC2}
+pc.eigenvalues <- eigen(allCAWA$Cov)$values
+pc.var.expl <- pc.eigenvalues[1:2] / sum(pc.eigenvalues) * 100
+
+PC12.prep <- breedingCAWA.prep %>%
+  filter(PCx == "PC-01", PCy == "PC-02")
+
+pca12 <- ggplot(PC12.prep, aes(x = val_x, y = val_y, color = Region_pop)) +
+  scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(aspect.ratio=1) + 
+  theme(legend.key.size = unit(0.1, "cm"))+
+  xlab("PC1: 0.995%") +
+  ylab("PC2: 0.934%")
+  
+pca12
+```
+
+Saving the plots for later
+
+```{r save the file of the PCA}
+ggsave(pca12, filename = "plots/cawa.filt.85fst.RDA.PC1.PC2.pdf",
+      width = 7, height = 7)
+
+svg("plots/cawa.filt.85fst.RDA.PC1.PC2.svg")
+pca12
+dev.off()
+```
+
+##PC2 and PC3
+
+```{r check PC2 and PC3}
+pc.eigenvalues <- eigen(allCAWA$Cov)$values
+pc.var.expl <- pc.eigenvalues[2:3] / sum(pc.eigenvalues) * 100
+
+PC23.prep <- breedingCAWA.prep %>%
+  filter(PCx == "PC-02", PCy == "PC-03")
+
+pca23 <- ggplot(PC23.prep, aes(x = val_x, y = val_y, color = Region_pop)) +
+  scale_color_manual(values = pca.color) +
+  geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(aspect.ratio=1) + 
+  theme(legend.key.size = unit(0.1, "cm"))+
+  xlab("PC2: 0.934%") +
+  ylab("PC3: 0.891%")
+  
+pca23
+```
+
+Save the plots
+
+```{r save the file of the PCA2-3}
+ggsave(pca23, filename = "plots/cawa.filt.85fst.RDA.PC2.PC3.pdf",
+      width = 7, height = 7)
+
+svg("plots/cawa.filt.85fst.RDA.PC2.PC3.svg")
+pca23
+dev.off()
+```
+
+## PCs 1 and 2
+
+```{r save PC1 and PC2 with shape coding instead of color}
+pc.eigenvalues <- eigen(allCAWA$Cov)$values
+pc.var.expl <- pc.eigenvalues[1:2] / sum(pc.eigenvalues) * 100
+
+PC12.prep <- breedingCAWA.prep %>%
+  filter(PCx == "PC-01", PCy == "PC-02")
+PC12.prep <- arrange(PC12.prep, Region_pop)
+
+##Save colors
+pca.color <- c("gray", "gray", "purple")
+pca.shapes <- c("0", "1", "2")
+
+pca12shape <- ggplot(PC12.prep, aes(x = val_x, y = val_y, color = Region_site, shape =Region_site)) +
+  scale_color_manual(values = pca.color) +
+ geom_point(size = 3, stroke = 0.15) +
+  theme_bw() + theme(aspect.ratio=1) + 
+  theme(legend.key.size = unit(0.1, "cm"))+
+  xlab("PC1: 0.995%") +
+  ylab("PC2: 0.934%")
+  
+pca12shape
+```
+
+Save the plot
+
+```{r save the file of the PCA1-2 with shapes}
+ggsave(pca12shape, filename = "plots/cawa.filt.85fst.RDA.PC1.PC2.shapes.pdf",
+      width = 7, height = 7)
+
+svg("plots/cawa.filt.85fst.RDA.PC1.PC2.shapes.svg")
+pca12shape
+dev.off()
+```
