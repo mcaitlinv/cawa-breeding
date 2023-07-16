@@ -25,7 +25,7 @@ Workflow
 ## 1) Initial check by PCA for any clustering due to sex, coverage, etc.
 
 Scripts: 
-  1) [pca.sequencer.rmd](https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/pca.sequencer.html)
+  1) [pca.sequencer.rmd](https://htmlpreview.github.io/https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/pca.sequencer.html)
   
 I used single read sampling to even out coverage across bams, since low-coverage samples can have read-depth bias that looks like population structure. I used a mix of rmd scripts and data manipulations using R on the HPCC using a script called runR.sbatch to submit R scripts with extra memory. 
 
@@ -48,7 +48,7 @@ After finding platform effects, I decided to split samples that were run on both
 ## 3) Re-check PCA
 
 Scripts: 
-  1) [pca.sequencer.rmd](https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/pca.sequencer.html)
+  1) [pca.sequencer.rmd](https://htmlpreview.github.io/https://github.com/mcaitlinv/cawa-breeding/blob/main/03_postprocessing/scripts/pca.sequencer.html)
   
 Using the filtered variant sets, I used PCA to check when platform associated clustering on PCA was not the primary separation. I decided the 85th percentile group had the least platform effects while still maintaining as many variants as possible. I used this variant set as my filtered, primary variant set for the rest of the analysis. 
 
