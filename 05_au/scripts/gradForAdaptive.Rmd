@@ -1,0 +1,455 @@
+---
+title: "Genomic offset for adaptive loci"
+author: "Caitlin Miller"
+date: "11/26/2022"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=T}
+knitr::opts_chunk$set(echo = TRUE)
+library(raster)
+library(sp)
+library(rgdal)
+library(extendedForest)
+library(gradientForest)
+library(gstat)
+library(RColorBrewer)
+library(rasterVis)
+library(tidyverse)
+library(readr)
+library(psych)
+library(sf)
+library(ggpubr)
+library(cluster)
+```
+
+Generated genomic data and model on HPCC using the following scripts:
+
+1) get.adapt.saf.sbatch
+2) maf.combine.R
+3) gradientForestRandomization.R
+
+```{r checking model generated on HPCC}
+
+adaptForest<-readRDS("adaptive/cawaAdaptForest.221126.rds")
+predictors_uncor<-c("bio10", "bio13", "bio15", "tree")
+##100k random spots
+birdgrid <- read.table("tables/cawagrid.txt",header=T,sep="\t")
+
+#Check predictor importance
+allpredictors=names(importance(adaptForest))
+plot(adaptForest,plot.type="Performance", show.names=F)
+plot(adaptForest,plot.type="Overall.Importance", show.names=F)
+#plot(adaptForest,plot.type="Cumulative.Importance", show.names=F)
+
+##Save as pdf 
+pdf("adaptive/output/cawa.gradFor.ntree500.adaptOnly.importance.pdf")
+plot(adaptForest,plot.type="O")
+dev.off()
+
+
+##Modeled across 100k random spots
+currentgrid=cbind(birdgrid[,c("x","y")],predict(adaptForest,birdgrid[, predictors_uncor]))
+write.table(currentgrid,"adaptive/tables/cawa.uncor.100k.bio10.bio13.bio15.tree.txt",sep="\t", quote=F)
+
+##Let's look at currentgrid, transformed environmental variables- see how they were transformed. Also note, the NA's in here. They are due to being near water and need to removed.
+dim(currentgrid)
+
+##Make PCAs to visualize data
+#Getting the PCs and Converting Them to RGB Color Values
+PCs=prcomp(currentgrid[,3:6]) 
+# set up a colour palette for the mapping
+a1 <- PCs$x[,1]
+a2 <- PCs$x[,2]
+a3 <- PCs$x[,3]
+
+r <- a1+a2
+g <- -a2
+b <- a3+a2-a1
+
+r <- (r-min(r)) / (max(r)-min(r)) * 255
+g <- (g-min(g)) / (max(g)-min(g)) * 255
+b <- (b-min(b)) / (max(b)-min(b)) * 255
+cawacols=rgb(r,g,b,max=255)
+cawacols2=col2rgb(cawacols)
+cawacols3=t(cawacols2)
+gradients=cbind(currentgrid[c("x","y")],cawacols3)
+
+
+
+##Biplot specifics
+nvs <- dim(PCs$rotation)[1]
+vec <- c("bio10","bio13", "bio15", "tree")
+lv <- length(vec)
+vind <- rownames(PCs$rotation) %in% vec
+scal <-100
+PCs$rotation[vec, 1]
+xrng <- range(PCs$x[, 1], PCs$rotation[, 1]/scal) *1.2
+yrng <- range(PCs$x[, 2], PCs$rotation[, 2]/scal) *1.2
+pdf("adaptive/output/cawa.pca.uncor.100k.bio10.bio13.bio15.tree.adaptOnly.pdf")
+plot((PCs$x[,1:2]), xlim = xrng, ylim = yrng, pch = ".", cex = 4, col = rgb(r, g, b, max = 255), asp = 1)
+points(PCs$rotation[!vind, 1:2]/scal, pch = "+")
+arrows(rep(0, lv), rep(0, lv), PCs$rotation[vec,1]/scal, PCs$rotation[vec, 2]/scal, length = 0.0625)
+jit <- 0.0015
+text(PCs$rotation[vec, 1]/scal + jit * sign(PCs$rotation[vec,1]), PCs$rotation[vec, 2]/scal + jit * sign(PCs$rotation[vec,2]), labels = vec)
+dev.off()
+
+
+cawa <- readOGR(dsn = path.expand("../gradient_forest/CAWA"), layer = "CAWA_Breeding")
+cawamap=gradients
+coordinates(cawamap)=~x+y #setting the coordinates
+proj4string(cawamap) <- CRS("+proj=longlat +datum=WGS84")
+
+pdf("adaptive/output/cawa.gradfor.uncor.100k.bio10.bio13.bio15.tree.adaptOnly.pdf")
+par(mar=c(0,0,0,0))
+plot(cawamap,col=rgb(r,g,b,max=255),pch=15)
+lines(cawa)
+dev.off()
+```
+Generating genomic vulnerability estimates
+
+```{r genomic vulnerability data points for adaptive, eval=F}
+##Read in future variables
+future1<-read.table("tables/cawagrid_F1.txt",header=T,sep="\t") 
+future2<-read.table("tables/cawagrid_F2.txt",header=T,sep="\t")
+birdgrid <- read.table("tables/cawagrid.txt",header=T,sep="\t")
+
+
+##Load in model, current vars, predictors
+adaptForest<-readRDS("adaptive/cawaAdaptForest.221126.rds")
+predictors_uncor<-c("bio10", "bio13", "bio15", "tree")
+currentgrid<-read.delim("adaptive/tables/cawa.uncor.100k.bio10.bio13.bio15.tree.txt",sep="\t")
+
+
+##predict future envs using ssp126
+futuregridSSP126=cbind(future1[,c("x","y")],predict(adaptForest,future1[,predictors_uncor]))
+
+coords<-birdgrid[,c("x","y")]
+euc <- matrix(data=NA,nrow=nrow(futuregridSSP126),ncol=3)
+for(j in 1:nrow(currentgrid)) {
+  euc[j,] <- c(as.numeric(coords[j,]),as.numeric(dist(rbind(currentgrid[j,],futuregridSSP126[j,]))))
+}
+euc <- data.frame(euc)
+names(euc) <- c("Long","Lat","Vulnerability")
+euc <- euc[complete.cases(euc),]
+euc$log <- log(euc$Vulnerability)
+write.table(euc,file="adaptive/tables/cawa.uncor.100k.bio10.bio13.bio15.tree.SSP126.eucDist.txt",quote=F,sep="\t",row.names=F)
+
+##Repeat with SSP585
+futuregridSSP585=cbind(future2[,c("x","y")],predict(adaptForest,future2[,predictors_uncor]))
+
+euc2 <- matrix(data=NA,nrow=nrow(futuregridSSP585),ncol=3)
+for(j in 1:nrow(currentgrid)) {
+  euc2[j,] <- c(as.numeric(coords[j,]),as.numeric(dist(rbind(currentgrid[j,],futuregridSSP585[j,]))))
+}
+euc2 <- data.frame(euc2)
+names(euc2) <- c("Long","Lat","Vulnerability")
+euc2 <- euc2[complete.cases(euc2),]
+euc2$log <- log(euc2$Vulnerability)
+write.table(euc2,file="adaptive/tables/cawa.uncor.100k.bio10.bio13.bio15.tree.SSP585.eucDist.txt",quote=F,sep="\t",row.names=F)
+
+```
+
+Now to plot the estimates
+
+```{r genomic maps adaptive}
+##Test on coastlines
+coastlines <- st_read("ne_shapefiles/ne_10m_coastline.shp")
+coast_cropped <- coastlines
+
+##Get states and provinces
+countries_cropped <- st_read("ne_shapefiles/ne_10m_admin_0_boundary_lines_land.shp")
+states_cropped <- st_read("ne_shapefiles/ne_10m_admin_1_states_provinces_lines.shp") 
+
+#Get your breeding range file
+cawa <- st_read("../../cawa-range-map/map/cawa.breed.sf.WGS84.Ebird.simplifiedQGIS.shp")
+
+
+##Read in euclidean matrices
+euc <- read.table("adaptive/tables/cawa.uncor.100k.bio10.bio13.bio15.tree.SSP126.eucDist.txt",header=T,sep="\t")
+euc2 <- read.table("adaptive/tables/cawa.uncor.100k.bio10.bio13.bio15.tree.SSP585.eucDist.txt",header=T,sep="\t")
+
+##Set a nice color palette
+colramp2=rev(brewer.pal(n = 9, name = "RdYlBu")[c(1:9)])
+Futcolors<-colorRampPalette(colramp2)
+
+##Put it all together
+euc_sp126<-st_as_sf(euc,coords=c("Long", "Lat"))
+st_crs(euc_sp126) <- st_crs(coast_cropped) 
+ssp126GV_map <- ggplot() +
+  geom_sf(data = coast_cropped, color="gray") +
+  geom_sf(data = countries_cropped, fill = NA, color="gray") +
+  geom_point(data=euc,aes(x=Long,y=Lat,color=Vulnerability),pch=15) +
+  scale_colour_gradientn(colours = Futcolors(100), limits=range(0.01,0.09))+
+  geom_sf(data=cawa, fill=NA) +
+  theme_bw() +
+  coord_sf(xlim =c(-128, -55), ylim = c(30, 61), expand = FALSE, crs=4326)
+
+ssp126GV_map
+svg(filename="adaptive/output/cawa.adaptive.gv.ssp126.map.230213.svg")
+ssp126GV_map
+dev.off()
+pdf("adaptive/output/cawa.adaptive.gv.ssp126.map.230213.pdf")
+ssp126GV_map
+dev.off()
+
+euc_sp585<-st_as_sf(euc2,coords=c("Long", "Lat"))
+st_crs(euc_sp585) <- st_crs(coast_cropped) 
+breaks <- c(0,0.02,0.04,0.06, 0.08)
+
+cluster_colors <-  c(
+  "#e1ad01", ##yellow for all
+  "#229047", ##green for northwest
+  "#2637D4", ##blue-purple for eastern
+  "#ff4a6a" ##pink for southern
+  )
+
+ssp585GV_map <- ggplot() +
+  geom_sf(data = coast_cropped, color="gray") +
+  geom_sf(data = countries_cropped, fill = NA, color="gray") +
+  geom_point(data=euc2,aes(x=Long,y=Lat,color=Vulnerability),pch=15) +
+  scale_colour_gradientn(colours = Futcolors(100), limits=range(0.01,0.09))+
+  geom_sf(data=cawa, fill=NA) +
+  theme_bw() +
+  coord_sf(xlim = c(-128, -55), ylim = c(30, 61), expand = FALSE, crs=4326)
+
+ssp585GV_map
+svg(filename="adaptive/output/cawa.adaptive.gv.ssp585.map.230213.svg")
+ssp585GV_map
+dev.off()
+
+pdf("adaptive/output/cawa.adaptive.gv.ssp585.map.230213.pdf")
+ssp585GV_map
+dev.off()
+
+```
+
+
+Now let's extract the GV values for each of the outlines of the AU units to see what the average GV is when comparing the AUs
+
+```{r adaptive unit GVs}
+
+au.eastern <- st_read("au-shapes/brick_cawa.genoscape_eastern.no_ovlp.shp")
+au.northwestern <- st_read("au-shapes/brick_cawa.genoscape_northwestern.no_ovlp.shp")
+au.southern <- st_read("au-shapes/brick_cawa.genoscape_southern.no_ovlp.shp")
+
+# plot(au.northwestern)
+# plot(au.eastern)
+# plot(au.southern)
+
+##Make a raster of the vulnerabilities
+ras_dom<-raster(xmn=-123.624, xmx=-61.1753, ymn=34.55603, ymx=59.4376,
+                          crs="+proj=longlat +datum=WGS84 +no_defs ",
+                          resolution=c(0.1,0.1), vals=NA)
+
+##For ssp126
+coordinates(euc) <- ~ Long + Lat # Convert data frame to spatial object
+ras.ssp126 <- rasterize(euc, ras_dom, "Vulnerability", update = TRUE) # put point in raster
+#plot(ras.ssp126) # The resulting raster with the point added
+
+##For ssp585
+coordinates(euc2) <- ~ Long + Lat # Convert data frame to spatial object
+ras.ssp585<- rasterize(euc2, ras_dom, "Vulnerability", update = TRUE) # put point in raster
+#plot(ras.ssp585) # The resulting raster with the point added
+
+#extract vulnerability in ssp126 to AUs
+ssp126.df.NW <- raster::extract(x = ras.ssp126, 
+                             y = au.northwestern, 
+                             df = TRUE)
+ssp126.df.NW$name <- "NW"
+ssp126.df.E <- raster::extract(x = ras.ssp126, 
+                             y = au.eastern, 
+                             df = TRUE)
+ssp126.df.E$name <- "E"
+ssp126.df.S <- raster::extract(x = ras.ssp126, 
+                             y = au.southern, 
+                             df = TRUE)
+ssp126.df.S$name <- "S"
+ssp126.df <- raster::extract(x = ras.ssp126, 
+                             y = cawa, 
+                             df = TRUE)
+ssp126.df$name <- "All"
+##Plot histograms of vulnerability
+##concat and plot together
+df.gv.au.126 <- rbind(ssp126.df.E,ssp126.df.NW,ssp126.df.S, ssp126.df)
+dim(df.gv.au.126) 
+df.gv.au.126 <- drop_na(df.gv.au.126)
+dim(df.gv.au.126)
+
+write.table(df.gv.au.126, "adaptive/tables/cawa.gv.au.126.txt", quote = F, row.names = F)
+
+##AU colors from genoscape
+cluster_colors <-  c(
+  "#e1ad01", ##yellow for all
+  "#229047", ##green for northwest
+  "#2637D4", ##blue-purple for eastern
+  "#ff4a6a" ##pink for southern
+  )
+
+##Histogram of gv values\
+histAU.126 <- ggplot(df.gv.au.126, aes(y=..density.., x=layer, fill=name)) +
+          geom_histogram(colour="black", fill="white", position="dodge", binwidth = 0.005)+
+  geom_density(alpha=0.5)  +
+  facet_grid(factor(name, levels=c("NW", "E" ,"S", "All")) ~ ., scales = "free") + scale_fill_manual(values=cluster_colors) +
+  labs(y="Density of observations", x="Genomic vulnerability for SSP126")+ theme_bw() + guides(fill = "none") +xlim(0.01, 0.09)
+histAU.126
+
+svg(filename="adaptive/output/cawa.adapt.gv.ssp126.histogram.221127.svg")
+histAU.126
+dev.off()
+
+pdf("adaptive/output/cawa.adapt.gv.ssp126.histogram.221127.pdf")
+histAU.126
+dev.off()
+
+##crop to plot just AUs
+ssp126.NW <- crop(x = ras.ssp126, y = au.northwestern)
+ssp126.E <- crop(x = ras.ssp126, y = au.eastern)
+ssp126.S <- crop(x = ras.ssp126, y = au.southern)
+
+# plot(ssp126.NW)
+# plot(ssp126.E)
+# plot(ssp126.S)
+
+#extract vulnerability in ssp126 to AUs
+ssp585.df.NW <- raster::extract(x = ras.ssp585, 
+                             y = au.northwestern, 
+                             df = TRUE)
+ssp585.df.NW$name <- "NW"
+ssp585.df.E <- raster::extract(x = ras.ssp585, 
+                             y = au.eastern, 
+                             df = TRUE)
+ssp585.df.E$name <- "E"
+ssp585.df.S <- raster::extract(x = ras.ssp585, 
+                             y = au.southern, 
+                             df = TRUE)
+ssp585.df.S$name <- "S"
+
+ssp585.df <- raster::extract(x = ras.ssp585, 
+                             y = cawa, 
+                             df = TRUE)
+ssp585.df$name <- "All"
+##Plot histograms of vulnerability
+##concat and plot together
+df.gv.au.585 <- rbind(ssp585.df.E,ssp585.df.NW,ssp585.df.S, ssp585.df)
+dim(df.gv.au.585) 
+df.gv.au.585 <- drop_na(df.gv.au.585)
+dim(df.gv.au.585)
+write.table(df.gv.au.585, "adaptive/tables/cawa.gv.au.585.txt", quote = F, row.names = F)
+
+##Histogram of gv values\
+histAU.585 <- ggplot(df.gv.au.585, aes(y=..density.., x=layer, fill=name)) +
+          geom_histogram(colour="black", fill="white", position="dodge", binwidth = 0.005)+
+  geom_density(alpha=0.5)  +
+  facet_grid(factor(name, levels=c("NW", "E" ,"S", "All")) ~ ., scales = "free") + scale_fill_manual(values=cluster_colors) +
+  labs(y="Density of observations", x="Genomic vulnerability for SSP585")+ theme_bw() + guides(fill = "none") +xlim(0.01, 0.09)
+histAU.585
+svg(filename="adaptive/output/cawa.adapt.gv.ssp585.histogram.221127.svg")
+histAU.585
+dev.off()
+
+pdf("adaptive/output/cawa.adapt.gv.ssp585.histogram.221127.pdf")
+histAU.585
+dev.off()
+
+
+##crop to plot just AUs
+ssp585.NW <- crop(x = ras.ssp585, y = au.northwestern)
+ssp585.E <- crop(x = ras.ssp585, y = au.eastern)
+ssp585.S <- crop(x = ras.ssp585, y = au.southern)
+
+# plot(ssp585.NW)
+# plot(ssp585.E)
+# plot(ssp585.S)
+
+
+cluster_colors2 <-  c(
+ ##yellow for all
+  "#229047", ##green for northwest
+  "#2637D4", ##blue-purple for eastern
+  "#ff4a6a", ##pink for southern
+  "#e1ad01"
+  )
+
+##Histograms of areas
+AU.585 <- df.gv.au.585 %>%
+  mutate(name = fct_relevel(name, 
+            "NW", "E", "S", 
+            "All")) %>%
+  ggplot(aes(x=name, y=layer, fill=as.factor(name)))+ 
+  scale_fill_manual(values=cluster_colors2) +
+  ggdist::stat_halfeye(
+    adjust = .5, 
+    width = .6, 
+    .width = 0, 
+    justification = -.3, 
+    point_colour = NA, alpha=0.5) + 
+  geom_boxplot(
+    width = .25, 
+    outlier.shape = NA, alpha=0.8
+  )  + 
+  coord_cartesian(xlim = c(1.2, NA), clip = "off")  +
+  labs(y="Genomic offset", x="Conservation Unit")+     scale_x_discrete(labels=c("NW AU","E AU","S AU","Entire range ESU")) +
+theme_bw() + guides(fill = "none")
+
+pdf("adaptive/output/cawa.adapt.gv.ssp585.hist.violinplot.221129.pdf")
+AU.585
+dev.off()
+  
+```
+
+
+```{r stats}
+library(tidyverse)
+df.gv.au.126 <- read_delim("adaptive/tables/cawa.gv.au.126.txt")
+df.gv.au.585 <- read_delim("adaptive/tables/cawa.gv.au.585.txt")
+sumstat126 <- df.gv.au.126  %>%
+  group_by(name) %>%
+  get_summary_stats(layer, type = "common")
+
+data.126 <- df.gv.au.126  %>% filter(name != "All")
+anova.126 <- aov(layer~name, data=data.126)
+
+summary(anova.126)
+
+par(mfrow=c(2,2))
+plot(anova.126)
+par(mfrow=c(1,1))
+
+
+sumstat585 <- df.gv.au.585  %>%
+  group_by(name) %>%
+  get_summary_stats(layer, type = "common")
+
+data.585 <- df.gv.au.585  %>% filter(name != "All")
+anova.585 <- aov(layer~name, data=data.585)
+
+summary(anova.585)
+
+par(mfrow=c(2,2))
+plot(anova.585)
+par(mfrow=c(1,1))
+
+##AU colors
+au_colors <-  c(
+  "#2637D4", ##blue-purple for eastern
+  "#229047", ##green for northwest
+  "#ff4a6a" ##pink for southern
+  )
+
+##Get comparisons of means
+# Add pairwise comparisons p-value
+my_comparisons <- list(c("NW", "E"), c("NW", "S"), c("E", "S"))
+boxplot126 <- ggboxplot(data.126, x = "name", y = "layer",
+                        color = "name", palette = au_colors)+
+  stat_compare_means(comparisons = my_comparisons, label.y = c(0.075, 0.08, 0.085))+
+  stat_compare_means(label.y =0.1)     # Add global Anova p-value
+
+boxplot585 <- ggboxplot(data.585, x = "name", y = "layer",
+                        color = "name", palette = au_colors)+
+  stat_compare_means(method="wilcox",comparisons = my_comparisons, label.y = c(0.085, 0.09, 0.095))+
+  stat_compare_means(label.y =0.105)
+
+```

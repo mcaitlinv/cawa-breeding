@@ -1,0 +1,210 @@
+---
+title: "Environmental variable rasters"
+author: "Caitlin Miller"
+date: "9/26/2022"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=T}
+knitr::opts_chunk$set(echo = TRUE)
+library(raster)
+library(sp)
+library(rgdal)
+library(extendedForest)
+library(gradientForest)
+library(gstat)
+library(RColorBrewer)
+library(rasterVis)
+library(tidyverse)
+library(readr)
+library(psych)
+library(sf)
+library(ggpubr)
+library(cluster)
+```
+
+
+```{r data processing of environmental variables, eval=F}
+
+##Load bioclim rasters
+for (i in 1:19) {
+  if (i < 10) {
+  num <- paste("0", i, sep="")
+  name <- paste("bio", num, sep="")
+  fileTemp <- paste("rasters/bioclim/wc2.0_bio_30s_", num,".tif", sep="")
+  assign(name, raster(fileTemp))
+  rm(num, name, fileTemp)
+  }
+  else {
+  fileTemp <- paste("rasters/bioclim/wc2.0_bio_30s_", i ,".tif", sep="")
+  name <- paste("bio", i, sep="")
+  assign(name, raster(fileTemp))
+  rm(name, fileTemp)
+  }
+}
+rm(i)
+
+##Load srtm raster
+srtm <- raster("rasters/srtm/srtm.tif")
+
+##loadNDVI
+ndvi <- raster("rasters/NDVI/ndvimax.tif")
+ndvistd <- raster("rasters/NDVI/ndvistd.tif")
+
+##Load treecover, wind
+qscat <- raster("rasters/other/qscat.tif")
+tree <- raster("rasters/other/tree.tif")
+hii <- raster("rasters/other/hii.tif")
+
+##Get breeding range for CAWA
+cawa <- sf::st_read("../../cawa-range-map/map/cawa.breed.sf.WGS84.Ebird.simplifiedQGIS.shp")
+##Stack the bioclim vars
+bioclim= stack(bio01, bio02, bio03, bio04, bio05, bio06, bio07, bio08, bio09, bio10,
+              bio11, bio12, bio13, bio14, bio15, bio16, bio17, bio18, bio19)
+names(bioclim) <- c("bio01", "bio02", "bio03", "bio04", "bio05",
+                         "bio06", "bio07", "bio08", "bio09", "bio10",
+                         "bio11", "bio12", "bio13", "bio14", "bio15", 
+                         "bio16", "bio17", "bio18", "bio19")
+##Stack everything else except Hii
+compareRaster(srtm, ndvi, ndvistd, tree)
+srtmstack=stack(srtm, ndvi, ndvistd, tree)
+names(srtmstack) <- c("srtm", "ndvi", "ndvistd", "tree")
+
+##remove individual rasters
+rm(list= ls()[!(ls() %in% c('srtmstack','bioclim', 'hii', 'cawa'))])
+
+# ##Crop just hii
+hii_crop=crop(hii, cawa)
+hii_cawa=mask(hii_crop,cawa)
+
+# 
+# ##Crop other stacks to just the hii stack
+bioclim_crop=crop(bioclim,cawa)
+bioclim_cawa=mask(bioclim_crop,cawa)
+##reduced set
+srtmstack_crop=crop(srtmstack,cawa)
+srtmstack_cawa=mask(srtmstack_crop,cawa)
+envVars <- raster::stack(bioclim_cawa, srtmstack_cawa)
+
+##Make set of rasters for future climate
+##Load ssp126 raster
+ssp126 <- raster::stack("rasters/bioclim_2041-2060_ssp126/wc2.1_2.5m_bioc_CanESM5_ssp126_2041-2060.tif")
+names(ssp126) <- c("bio01", "bio02", "bio03", "bio04", "bio05",
+                         "bio06", "bio07", "bio08", "bio09", "bio10",
+                         "bio11", "bio12", "bio13", "bio14", "bio15", 
+                         "bio16", "bio17", "bio18", "bio19")
+##Load ssp585 raster
+ssp585 <- raster::stack("rasters/bioclim_2041-2060_ssp585/wc2.1_2.5m_bioc_CanESM5_ssp585_2041-2060.tif")
+names(ssp585) <- c("bio01", "bio02", "bio03", "bio04", "bio05",
+                         "bio06", "bio07", "bio08", "bio09", "bio10",
+                         "bio11", "bio12", "bio13", "bio14", "bio15", 
+                         "bio16", "bio17", "bio18", "bio19")
+
+##Pull in sampled locations
+cawaSampled <- read.delim("cawa_seq_locations_all.txt", sep="\t")
+##remove maine and ontario
+cawaSampled <- cawaSampled[c(-5,-11),]
+cawaSampled.xy <- as.matrix(cawaSampled[c("long", "lat")])
+##pull in individual lat/longfor rda
+cawaInd <- read.delim("cawa.seq.locations.ind.txt", sep="\t")
+cawaInd.xy <- as.matrix(cawaInd[c("long", "lat")])
+
+##Extract current variables for sampled locations
+cawaBioClim <- raster::extract(bioclim, cawaSampled.xy, fun=mean, buffer=500)
+cawaSrtm <- raster::extract(srtmstack,  cawaSampled.xy, fun=mean, buffer=500)
+cawaHii <- raster::extract(hii, cawaSampled.xy, method='bilinear')
+##Extract for ind
+indBioClim <- raster::extract(bioclim, cawaInd.xy, fun=mean, buffer=10)
+indSrtm <- raster::extract(srtmstack,  cawaInd.xy, fun=mean, buffer=10)
+indHii <- raster::extract(hii, cawaInd.xy, method='bilinear')
+
+
+##Extract future variables for sampled locations
+cawaSSP126 <- raster::extract(ssp126,  cawaSampled.xy, fun=mean)
+cawaSSP585 <- raster::extract(ssp585,  cawaSampled.xy, fun=mean)
+
+##Link data and save environmental variables for current day
+cawaEnv<- data.frame(cawaSampled[, c("long","lat")], cawaBioClim, cawaSrtm, cawaHii)
+cawaEnv[(is.na(cawaEnv[]))] <- 0
+write.table(cawaEnv,file="tables/cawaEnv2.txt",row.names=FALSE,quote=F,sep='\t')
+##Link data for ind
+indEnv<- data.frame(cawaInd[, c("long","lat")], indBioClim, indSrtm, indHii)
+indEnv[(is.na(indEnv[]))] <- 0
+write.table(indEnv,file="tables/indEnv.txt",row.names=FALSE,quote=F,sep='\t')
+
+##Future predictions for tree, elevation, and human influence are not available or nonsense, so keeping those constant
+##Write data for future climate
+cawa126<- data.frame(cawaSampled[, c("long","lat")], cawaSSP126, cawaSrtm,cawaHii)
+write.table(cawa126, file="tables/cawaFuture126.txt",row.names=FALSE,quote=F,sep='\t')
+cawa585<- data.frame(cawaSampled[, c("long","lat")], cawaSSP585, cawaSrtm, cawaHii)
+write.table(cawa585, file="tables/cawaFuture585.txt",row.names=FALSE,quote=F,sep='\t')
+
+##Get random points across the breeding range for future variables
+##Uses current vars for srtm, tree, qscat, and ndvi b/c no great predictive rasters for those
+##SSP126
+ssp126_crop=crop(ssp126,cawa)
+ssp126_cawa=mask(ssp126_crop,cawa)
+##Need slightly different resolution for future
+srtm_2.5 <- raster(extent(ssp126_cawa))
+srtm_2.5 <-  resample(srtmstack_cawa, ssp126_cawa, method = 'bilinear')
+##check
+compareRaster(srtm_2.5, ssp126_cawa)
+future1 <- stack(ssp126_cawa, srtm_2.5)
+##SSP585
+ssp585_crop=crop(ssp585,cawa)
+ssp585_cawa=mask(ssp585_crop,cawa)
+#plot(ssp585_cawa)
+future2 <- stack(ssp585_cawa, srtm_2.5)
+
+#Sample random sites only within breeding range, rename the columns and then #print out your random sites
+set.seed(123)
+randomsites=sampleRandom(envVars,size=140000,na.rm=TRUE,xy=TRUE,sp=TRUE)
+randomsites=as.data.frame(randomsites)
+write.table(randomsites,file="tables/cawagrid.txt",row.names=FALSE,quote=F,sep='\t')
+
+##Random locations need to be the same for future and present
+##Get same coords as present
+randomsites.xy=as.matrix(randomsites[,c("x","y")])
+##Extract future ssp126 bioclim for random coords
+randomsitesF1=raster::extract(future1,randomsites.xy)
+randomsitesF1=as.data.frame(randomsitesF1)
+randomsitesF1=cbind(randomsites.xy,randomsitesF1)
+
+##Extract future ssp585 bioclim for random coords
+randomsitesF2=raster::extract(future2,randomsites.xy)
+randomsitesF2=as.data.frame(randomsitesF2)
+randomsitesF2=cbind(randomsites.xy,randomsitesF2)
+
+##Random points need to have no NAs
+##Making lists of row numbers in each dataframe that contain NAs
+list= rownames(randomsites)[!complete.cases(randomsites)]
+##No NAs in original random data
+listF1= rownames(randomsitesF1)[!complete.cases(randomsitesF1)]
+listF2= rownames(randomsitesF2)[!complete.cases(randomsitesF2)]
+identical(listF1, listF2)
+##Both future randomsites have the same rows with NA
+##Reset character to numeric in F2
+listF2 <-as.numeric(listF2)
+##Make some data frames
+noNA.randomsites = data.frame()
+noNA.randomsitesF1 = data.frame()
+noNA.randomsitesF2 = data.frame()
+##Print rows that are not in the list to noNA dfs
+noNA.randomsites <- randomsites %>% slice(-listF2)
+noNA.randomsitesF1 <- randomsitesF1 %>% slice(-listF2)
+noNA.randomsitesF2 <- randomsitesF2 %>% slice(-listF2)
+##Check for NAs
+rownames(noNA.randomsitesF1)[!complete.cases(noNA.randomsitesF1)]
+rownames(noNA.randomsitesF2)[!complete.cases(noNA.randomsitesF2)]
+
+##Write them to computer
+write.table(noNA.randomsites,file="tables/cawagrid.txt",row.names=FALSE,quote=F,sep='\t')
+write.table(noNA.randomsitesF1,file="tables/cawagrid_F1.txt",row.names=FALSE,quote=F,sep='\t')
+write.table(noNA.randomsitesF2,file="tables/cawagrid_F2.txt",row.names=FALSE,quote=F,sep='\t')
+
+rm(list=ls())
+
+```
+
