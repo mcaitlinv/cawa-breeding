@@ -1,0 +1,173 @@
+---
+title: "LFMM"
+author: "Caitlin Miller"
+date: "11/23/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# if(!requireNamespace("qvalue", quietly = TRUE)) {
+#   if (!requireNamespace("BiocManager", quietly = TRUE))
+#     install.packages("BiocManager")
+#   BiocManager::install(version = "3.17")
+#   BiocManager::install("qvalue")
+# }
+# if(!requireNamespace("lfmm", quietly = TRUE)) {
+#   remotes::install_github("bcm-uga/lfmm")
+# }
+library(vegan)    # Used to run PCA & RDA
+library(lfmm)     # Used to run LFMM
+library(qvalue)   # Used to post-process LFMM output
+library(adegenet)  #to load SNP data
+library(readxl)
+library(tidyverse)
+```
+
+## Running LFMM to get snps associated with environmental vars
+
+Since I've already done RDA, I will take the overlap!
+
+```{r load data and process}
+
+##Data for individual genotypes was gnerated with GATK
+##thnn missing genotypes were imouted with beagle
+
+rawSNPs <- read.PLINK("input/rda.cawa.bqsr.miss0.2.qual30.1X.fst85.imputeAll.imputed.gl.noIndel.ldremove.raw")
+gen.imp <- as.data.frame(rawSNPs)
+rm(rawSNPs)
+
+##remove the bad candidates
+cand <- read.delim(file="../rda/results/cawa.mem.ind.cand.snps.txt", header=T)
+##Select variants associated with mergedY predictor
+pass1candremove <- cand %>% filter(predictor=="platform") %>% select("snp") %>% t() %>% as.list()
+
+##Remove variants associated with mergedY predictor
+gen.imp<- gen.imp[,!colnames(gen.imp) %in% pass1candremove]
+
+  
+##Env for all individuals 
+clim<-read_excel('input/ind.env.xlsx')
+##Read in meta data 
+meta<-read_excel("input/cawa_seq_metadata.xlsx")
+
+##Add sample id to the cliamte data and sequencer
+clim$sample <- meta$sample
+clim$sample <- as.character(clim$sample)
+
+##Check the long is the same
+identical(clim$long, meta$long)
+
+##BIO10- mean temp warmest quarter as measure of temp during breeding
+##BIO15- precipitation seasonality
+##BIO13- precipitation of the warmest quarter
+##Tree- percent tree cover
+##platform- hiseq or novaseq
+pred <- subset(clim, select=c(tree, bio10, bio13, bio15))
+
+```
+
+## Check the variable you want to include for PC values
+
+```{r PCA of all environmental variables}
+##PCA using rda function from vegan
+pred.pca <- rda(pred, scale=T)
+summary(pred.pca)$cont
+
+##Visually see weights of PCS
+screeplot(pred.pca, main = "Screeplot: Eigenvalues of CAWA Predictor Variables")
+
+##Check variable weights per PC
+round(scores(pred.pca, choices=1:4, display="species", scaling=0), digits=3)
+
+
+##Store PC1 as predictor for LFMM
+pred.PC1 <- scores(pred.pca, choices=1, display="sites", scaling=0)
+
+##Check for K in LFMM
+##Looking for PCs that explain more than red line
+screeplot(pred.pca, main = "Screeplot of CAWA Predictor Variables with Broken Stick", bstick=TRUE, type="barplot")
+##Only PC1/PC4
+##Rule of thumb is #PCs + 1, so setting K=3
+
+##PCA of genomic values and then plot with broken stick method
+gen.pca <- rda(gen.imp, scale=T)
+screeplot(gen.pca, main = "Screeplot of Genetic Data with Broken Stick", bstick=TRUE, type="barplot")
+##By this method, suggest K=1
+
+```
+
+Running the LFMM of cawa with K=3
+
+```{r LFMM with K3}
+##Set K to 3
+K <- 3
+
+##Run lfmm
+cawa.lfmm <- lfmm_ridge(Y=gen.imp, X=pred.PC1, K=K) ## change K as you see fit
+
+```
+
+Then to actually post-process the results from LFMM
+
+```{r processing with K2}
+##Check your test statistics for your predictors
+cawa.pv <- lfmm_test(Y=gen.imp, X=pred.PC1, lfmm=cawa.lfmm, calibrate="gif")
+
+names(cawa.pv) # this object includes raw z-scores and p-values, as well as GIF-calibrated scores and p-values
+##Check for GIF value of ~=1
+cawa.pv$gif ##1.911957
+
+##Checking histograms of p-values 
+##Unadjusted 
+hist(cawa.pv$pvalue[,1], main="Unadjusted p-values")  
+##GIF adjusted
+hist(cawa.pv$calibrated.pvalue[,1], main="GIF-adjusted p-values (GIf=1.911957)")
+
+##Manually set GIF to 1
+zscore <- cawa.pv$score[,1]   # zscores for first predictor, we only have one in our case...
+(gif <- cawa.pv$gif[1])       ## default GIF for this predictor
+new.gif1 <- 1.0
+# Manual adjustment of the p-values:
+adj.pv1 <- pchisq(zscore^2/new.gif1, df=1, lower = FALSE)
+##Plot new p-vals
+hist(adj.pv1, main="Readjusted p-values (GIF=1.0)")
+##Add new pvalues in
+cawa.pv$adj.pv1 <- adj.pv1 
+
+##Sticking to GIF default
+##Adjust p-vals to q-vals
+cawa.qv <- qvalue(cawa.pv$adj.pv1)$qvalues
+length(which(cawa.qv < 0.01)) ## h.w many SNPs have an FDR < 1%?
+##9212
+length(which(cawa.qv < 0.001))
+##3635
+cawa.FDR.01 <- colnames(gen.imp)[which(cawa.qv < 0.01)]
+##Write SNPs to 
+write.table(cawa.FDR.01 ,"results/lfmm.01.221123.txt",row.names=F,sep = "\t", quote=F)
+cawa.FDR.01<- read.table(file="results/lfmm.01.221123.txt", header=T)
+
+
+##Load RDA candidates
+rda.cand <- read.table(file="../RDA/results/cawa2.mem.ind.cand.snps.txt", header=T)
+
+##intersect RDA and LFMM snps
+intersect <- intersect(cawa.FDR.01$x, rda.cand$snp) 
+length(intersect)
+
+##Unique to LFMM
+uLFMM <- setdiff(cawa.FDR.01$x, rda.cand$snp) 
+length(uLFMM)
+
+##Unique to RDA
+uRDA <- setdiff(rda.cand$snp, cawa.FDR.01$x)
+length(uRDA)
+
+##Write intersection of SNPs to 
+write.table(intersect, "results/lfmm.rda.intersect.221123.txt",row.names=F,sep = "\t", quote=F)
+##Write all SNPs to 
+all <- union(cawa.FDR.01$x, rda.cand$snp)
+length(all)
+write.table(all, "results/lfmm.rda.all.221123.txt",row.names=F,sep = "\t", quote=F)
+
+```

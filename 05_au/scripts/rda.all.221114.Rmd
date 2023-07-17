@@ -1,0 +1,776 @@
+---
+title: 'Redundancy Analysis: individuals'
+author: "Caitlin Miller"
+date: "11/14/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(vegan)
+library(adegenet)
+library(tidyverse)
+require(readr)
+library(data.table)
+library(reshape2)
+library(psych)
+library(RColorBrewer)
+library(codep)
+library(adespatial)
+library(adegraphics)
+library(readxl)
+
+```
+
+##Generating input files
+
+SNPs were generated from a filtered vcf file that was imputed using beagle4.1 from the genotyoe probabilities. SNPs were then filtered for linkage disequilibrium with plink and then extracted in .raw format. Script to generate vcf is here, script to impute using beagle is here, and script to remove linkage is here.
+
+```{r loading and prepping inputs for individuals}
+
+##Data for individual genotypes was gnerated with GATK
+##thnn missing genotypes were imouted with beagle
+
+rawSNPs <- read.PLINK("input/rda.cawa.bqsr.miss0.2.qual30.1X.fst85.imputeAll.imputed.gl.noIndel.ldremove.raw")
+gen.imp <- as.data.frame(rawSNPs)
+rm(rawSNPs)
+
+  
+##Env for all individuals 
+clim<-read_excel('input/ind.env.xlsx')
+##Read in meta data 
+meta<-read_excel("input/cawa_seq_metadata.xlsx")
+
+##Add sample id to the cliamte data and sequencer
+clim$sample <- meta$sample
+clim$sample <- as.character(clim$sample)
+clim$merged <- meta$merged
+clim$merged <- as.factor(clim$merged)
+
+##Check the long is the same
+identical(clim$long, meta$long)
+
+##Check for correlation
+write.table(cor(clim[,3:26], method= "spearman"), 'tables/indenvCorr.txt',sep="\t",quote=F,row.names=T)
+##Woof there are a lot
+##BIO10- mean temp warmest quarter as measure of temp during breeding
+##BIO15- precipitation seasonality
+##BIO13- precipitation of the warmest quarter
+##Tree- percent tree cover
+##platform- hiseq or novaseq
+pred <- subset(clim, select=c(tree, bio10, bio13, bio15))
+pred$platform<-ifelse(meta$platform=="hiseq",1,0)
+##Check corr 
+pairs.panels(pred, scale=T)
+
+```
+
+After loading data for each individual, I added a variable for each individual. I used Moran's eigen vectors to stand in for geography since there was considerable isolation by distance found across the range.
+
+```{r Getting Moran Eigen Vectors}
+## Spatial predictors with Moran Eigenvector's Maps (MEMs)
+# libraries
+
+#############################################
+# meta data with lat/long for individual's sampling site
+cawa.individuals <- meta %>% dplyr::select(sample, lat, long, site) 
+
+#############################################
+# MEMs
+
+# individual coordinates in order of lat and lon
+cawa.coordinates <- as.matrix(cawa.individuals[,c(2,3)])
+
+# compuate spatial distances
+cawa.spatial <- gcd.hf(cawa.coordinates)
+cawa.dbmem <- dbmem(cawa.spatial)
+
+# first mem explains ~64% of the geographic variation
+## check importance of the different components
+cawa.moran.randtest <- moran.randtest(cawa.dbmem)
+
+##Save MEM1 with environmental variables
+pred$MEM1 <- cawa.dbmem$MEM1
+
+##Check corr 
+pairs.panels(pred, scale=T)
+```
+
+Then I used the new individual dataset with the new Moran's eigenvectors to run the redundancy analysis.
+
+```{r RDA by individual first pass, echo=FALSE}
+##Run rda
+cawa.ind.rda <- rda(gen.imp ~ Condition(MEM1) + tree + bio10 + bio13 + bio15 + platform, data=pred, scale=T)
+
+##Save RDA to file
+saveRDS(cawa.ind.rda, file = "cawa.mem.ind.rda.rds")
+##Read back in RDA
+cawa.ind.rda <- readRDS(file = "cawa.mem.ind.rda.rds")
+
+##find the adjusted rquared value
+RsquareAdj(cawa.ind.rda) ##explains 4.6% of variation
+
+##Check the eiganvalues
+summary(eigenvals(cawa.ind.rda, model = "constrained"))
+screeplot(cawa.ind.rda)
+pdf('results/cawa.mem.ind.rda.scree.pdf')
+screeplot(cawa.ind.rda)
+dev.off()
+##Check the importancae of PCA axes
+summary(cawa.ind.rda)$concont
+
+##test against null that env explains no variation
+##Full model
+signif.full <- anova.cca(cawa.ind.rda, parallel=getOption("mc.cores")) # default is permutation=999
+signif.full
+
+#############
+####Results##
+# Permutation test for rda under reduced model
+# Permutation: free
+# Number of permutations: 999
+# 
+# Model: rda(formula = gen.imp ~ Condition(MEM1) + tree + bio10 + bio13 + bio15 + platform, data = pred, scale = T)
+#           Df Variance     F Pr(>F)    
+# Model      5    18126 1.334  0.001 ***
+# Residual 162   440250                 
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# #############
+
+##checking for potential multicollinearity
+vif.cca(cawa.ind.rda)
+```
+
+
+Then let's make a pretty plot of the snps.
+
+```{r RDA by ind plots, echo=FALSE}
+
+##Add sample id to the cliamte data and sequencer
+clim$sample <- meta$sample
+clim$sample <- as.character(clim$sample)
+clim$merged <- meta$merged
+clim$merged <- as.factor(clim$merged)
+
+row.names(gen.imp) <- clim$sample
+
+svg('results/cawa.mem.ind.rda.plot.simple.RD1.RD2.svg')
+plot(cawa.ind.rda, scaling=3)
+dev.off()        # default is axes 1 and 2
+
+pdf('results/cawa.mem.ind.rda.plot.simple.RD3.RD4.pdf')
+plot(cawa.ind.rda, choices = c(3, 4), scaling=3)  # axes 1 and 3
+dev.off()  
+
+pred$clim <- meta$site
+eco <- as.factor(pred$clim)
+
+##Save colors to sites that are close to each other
+##Western blues 
+AB.cols <- brewer.pal(n = 9, name = "Blues")[c(4:6)]
+##Eastern oranges
+MB.col <-brewer.pal(n = 9, name = "Oranges")[2]
+##Eastern oranges
+ME.col <-brewer.pal(n = 9, name = "Oranges")[3]
+##Eastern oranges
+MN.col <-brewer.pal(n = 12, name = "Set3")[4]
+##Eastern oranges
+NB.col<-brewer.pal(n = 11, name = "PuOr")[1]
+##Pink
+NC.col<-brewer.pal(n = 9, name = "Dark2")[4]
+##Eastern oranges
+NH.col <-brewer.pal(n = 9, name = "Oranges")[4]
+##Eastern oranges
+NY.col <-brewer.pal(n = 9, name = "Oranges")[5]
+##Eastern oranges
+ON.col <-brewer.pal(n = 9, name = "Oranges")[5]
+##Southern greens
+PA.cols <- brewer.pal(n = 9, name = "BuGn")[c(6:7)]
+##Eastern oranges
+QC.cols <-brewer.pal(n = 9, name = "Oranges")[c(6,7)]
+##Red
+RI.col<-brewer.pal(n = 11, name = "Set1")[1]
+##Eastern oranges
+WI.col<-brewer.pal(n = 11, name = "RdGy")[3]
+##Southern greens
+WV.col<-brewer.pal(n = 9, name = "BuGn")[4]
+
+
+##Save colors
+bg <- c(AB.cols, MB.col, ME.col, MN.col, NB.col, NC.col, NH.col, NY.col, ON.col, PA.cols, QC.cols, RI.col, WI.col, WV.col)
+
+# axes 1 & 2
+pdf('results/cawa.mem.ind.rda.plot.RD1.RD2.pdf')
+plot(cawa.ind.rda, type="n", scaling=3)
+#points(cawa.ind.rda, display="species", pch=20, cex=0.7, col="gray32", scaling=3)           # the SNPs
+points(cawa.ind.rda, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[eco]) # the sites
+text(cawa.ind.rda, scaling=3, display="bp", col="#0868ac", cex=1)                           # the predictors
+legend("bottomright", legend=levels(eco), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+dev.off()  
+
+# axes 3 & 4
+pdf('results/cawa.mem.ind.rda.plot.RD3.RD4.pdf')
+plot(cawa.ind.rda, type="n", scaling=3, choices=c(3,4))
+#points(cawa.ind.rda, display="species", pch=20, cex=0.7, col="gray32", scaling=3)           # the SNPs
+points(cawa.ind.rda, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[eco]) # the sites
+text(cawa.ind.rda, scaling=3, display="bp", col="#0868ac", cex=1)                           # the predictors
+legend("bottomright", legend=levels(eco), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+dev.off()  
+
+
+##check for outlier snps
+
+load.rda <- scores(cawa.ind.rda, choices=c(1:3), display="species")  # Species scores for the first 3 constrained axes
+
+hist(load.rda[,1], main="Loadings on RDA1")
+hist(load.rda[,2], main="Loadings on RDA2")
+hist(load.rda[,3], main="Loadings on RDA3") 
+
+##Function to select outlier snps
+
+outliers <- function(x,z){
+  lims <- mean(x) + c(-1, 1) * z * sd(x)   #find loadings +/-z sd from mean loading     
+  x[x < lims[1] | x > lims[2]]             #locus names in these tails
+}
+
+cand1 <- outliers(load.rda[,1],2) # 22174
+cand2 <- outliers(load.rda[,2],2) # 21622
+cand3 <- outliers(load.rda[,3],2) # 21012
+
+##Find total # candidates
+ncand <- length(cand1) + length(cand2) + length(cand3)
+ncand ##64808
+
+
+df.cand1 <- cbind.data.frame(rep(1,times=length(cand1)), names(cand1), unname(cand1))
+df.cand2 <- cbind.data.frame(rep(2,times=length(cand2)), names(cand2), unname(cand2))
+df.cand3 <- cbind.data.frame(rep(3,times=length(cand3)), names(cand3), unname(cand3))
+
+
+colnames(df.cand1) <- colnames(df.cand2) <- colnames(df.cand3) <- c("axis","snp","loading")
+
+df.cand <- rbind(df.cand1, df.cand2, df.cand3)
+df.cand$snp <- as.character(df.cand$snp)
+
+
+##Add environmental correlations to candidate snps
+foo <- matrix(nrow=(ncand), ncol=5)  #5 columns for 5 predictors
+colnames(foo) <- c("tree", "bio10", "bio13","bio15","platform")
+pred2 <- pred[,1:5]
+for (i in 1:length(df.cand$snp)) {
+  nam <- df.cand[i,2]
+  snp.gen <- gen.imp[,nam]
+  foo[i,] <- apply(pred2,2,function(x) cor(x,snp.gen))
+}
+
+cand <- cbind.data.frame(df.cand,foo)  
+head(cand)
+
+##check and remove duplicate snps
+length(cand$snp[duplicated(cand$snp)])
+foo <- cbind(cand$axis, duplicated(cand$snp)) 
+table(foo[foo[,1]==1,2]) # no duplicates on axis 1
+table(foo[foo[,1]==2,2]) # 18202 duplicates on axis 2
+table(foo[foo[,1]==3,2]) # 18787 duplicates on axis 3
+cand <- cand[!duplicated(cand$snp),] # remove duplicate detections
+
+##Chekc predictor candidate is most correlated to
+cols <- as.numeric(ncol(cand))
+for (i in 1:length(cand$snp)) {
+  bar <- cand[i,]
+  cand[i,(cols+1)] <- names(which.max(abs(bar[4:cols]))) # gives the variable
+  cand[i,(cols+2)] <- max(abs(bar[4:cols]))              # gives the correlation
+}
+
+colnames(cand)[cols+1] <- "predictor"
+colnames(cand)[cols+2] <- "correlation"
+
+table(cand$predictor) 
+##bio10 12315 Temperature Seasonality
+##bio13 12660 Mean Temperature of the Warmest Quarter
+##bio15 9209 Precipitation Seasonality
+##platform 17827 Mean Precipitation of the Warmest Quarter
+##tree 10110 Merged or not data
+
+##Write all candidate snps
+write.table(cand,"results/cawa.mem.ind.cand.snps.txt",row.names=F,sep = "\t", quote=F)
+
+
+##Plot the snps 
+sel <- cand$snp
+env <- cand$predictor
+env[env=="bio10"] <- '#6b2222' ##dark red
+env[env=="tree"] <- '#286b22' ##green
+env[env=="bio13"] <- '#8fd9d4' ##light red
+env[env=="bio15"] <-  '#00008b'##light blue
+env[env=="platform"] <- '#000000' ##black
+
+
+# color by predictor:
+col.pred <- rownames(cawa.ind.rda$CCA$v) # pull the SNP names
+
+for (i in 1:length(sel)) {           # color code candidate SNPs
+  foo <- match(sel[i],col.pred)
+  col.pred[foo] <- env[i]
+}
+
+col.pred[grep("scaffold",col.pred)] <- '#f1eef6' # non-candidate SNPs
+empty <- col.pred
+empty[grep("#f1eef6",empty)] <- rgb(0,1,0, alpha=0) # transparent
+empty.outline <- ifelse(empty=="#00FF0000","#00FF0000","gray32")
+bg <- c('#6b2222','#286b22','#e37d7d','#8fd9d4',"#00008b",'#000000')
+
+
+# axes 1 & 2
+pdf('results/cawa.mem.ind.rda.plot.cand.snps.RD1.RD2.pdf')
+plot(cawa.ind.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1))
+#points(cawa.ind.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3)
+points(cawa.ind.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3)
+text(cawa.ind.rda, scaling=3, display="bp", col="#0868ac", cex=1)
+legend("bottomright", legend=c("bio10","tree","bio04","bio15","mergedY"), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+dev.off()
+
+# axes 1 & 3
+pdf('results/cawa.mem.ind.rda.plot.cand.snps.RD1.RD3.pdf')
+plot(cawa.ind.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1), choices=c(1,3))
+#points(cawa.ind.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3, choices=c(1,3))
+points(cawa.ind.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3, choices=c(1,3))
+text(cawa.ind.rda, scaling=3, display="bp", col="#0868ac", cex=1, choices=c(1,3))
+legend("bottomright", legend=c("bio10","tree","bio04","bio15","mergedY"), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+dev.off()
+
+```
+
+Since first pass of RDA found variants associated with platform effects, the variable that deals with sequencing lane artifacts I am removing them and re-running it.
+
+```{r RDA by individual second pass, echo=FALSE}
+rm(list=setdiff(ls(), c('gen.imp', 'meta','pred', 'clim', 'bg')))
+
+cand <- read.delim(file="results/cawa.mem.ind.cand.snps.txt", header=T)
+##Select variants associated with mergedY predictor
+pass1candremove <- cand %>% filter(predictor=="platform") %>% select("snp") %>% t() %>% as.list()
+write.table(cand %>% filter(predictor=="platform"),"results/remove.snps.txt",row.names=F,sep = "\t", quote=F)
+
+
+##Remove variants associated with mergedY predictor
+new.gen.imp<- gen.imp[,!colnames(gen.imp) %in% pass1candremove]
+
+##compare dimensions of datasets
+dim(gen.imp)
+dim(new.gen.imp)
+rm(gen.imp)
+
+##Run rda
+cawa2.rda <- rda(new.gen.imp ~ Condition(MEM1) + tree + bio10 + bio13 + bio15, data=pred, scale=T)
+
+# ##Save RDA to file
+saveRDS(cawa2.rda, file = "cawa2.mem.ind.rda.rds")
+##Read back in RDA
+cawa2.rda <- readRDS(file = "cawa2.mem.ind.rda.rds")
+
+##find the adjusted rquared value
+RsquareAdj(cawa2.rda) ##0.007345248
+
+##Check the eiganvalues
+summary(eigenvals(cawa2.rda, model = "constrained"))
+screeplot(cawa2.rda)
+pdf('results/cawa2.mem.ind.rda.scree.pdf')
+screeplot(cawa2.rda)
+dev.off()
+##Check the importancae of PCA axes
+summary(cawa2.rda)$concont
+
+##test against null that env explains no variation
+##Full model
+signif.full <- anova.cca(cawa2.rda, parallel=getOption("mc.cores")) # default is permutation=999
+signif.full
+
+# Permutation test for rda under reduced model
+# Permutation: free
+# Number of permutations: 999
+# 
+# Model: rda(formula = new.gen.imp ~ Condition(MEM1) + tree + bio10 + bio13 + bio15, data = pred, scale = T)
+#           Df Variance      F Pr(>F)    
+# Model      4    13732 1.3106  0.001 ***
+# Residual 163   426972                  
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+
+##checking for potential multicollinearity
+vif.cca(cawa2.rda)
+
+
+```
+
+
+```{r RDA by ind 2nd pass plotting}
+##check for outlier snps
+load.rda <- scores(cawa2.rda, choices=c(1:3), display="species")  # Species scores for the first 3 constrained axes
+hist(load.rda[,1], main="Loadings on RDA1")
+hist(load.rda[,2], main="Loadings on RDA2")
+hist(load.rda[,3], main="Loadings on RDA3") 
+
+##Function to select outlier snps
+outliers <- function(x,z){
+  lims <- mean(x) + c(-1, 1) * z * sd(x)   #find loadings +/-z sd from mean loading     
+  x[x < lims[1] | x > lims[2]]             #locus names in these tails
+}
+
+cand1 <- outliers(load.rda[,1],3) # 2631
+cand2 <- outliers(load.rda[,2],3) # 1212
+cand3 <- outliers(load.rda[,3],3) # 997
+
+##Find total # candidates
+ncand <- length(cand1) + length(cand2) + length(cand3)
+ncand ##4840
+
+
+df.cand1 <- cbind.data.frame(rep(1,times=length(cand1)), names(cand1), unname(cand1))
+df.cand2 <- cbind.data.frame(rep(2,times=length(cand2)), names(cand2), unname(cand2))
+df.cand3 <- cbind.data.frame(rep(3,times=length(cand3)), names(cand3), unname(cand3))
+
+
+colnames(df.cand1) <- colnames(df.cand2) <- colnames(df.cand3) <- c("axis","snp","loading")
+
+df.cand <- rbind(df.cand1, df.cand2, df.cand3)
+df.cand$snp <- as.character(df.cand$snp)
+
+
+##Add environmental correlations to candidate snps
+foo <- matrix(nrow=(ncand), ncol=4)  #5 columns for 5 predictors
+colnames(foo) <- c("tree", "bio10", "bio13","bio15")
+pred2 <- pred[,1:4]
+for (i in 1:length(df.cand$snp)) {
+  nam <- df.cand[i,2]
+  snp.gen <- new.gen.imp[,nam]
+  foo[i,] <- apply(pred2,2,function(x) cor(x,snp.gen))
+}
+
+cand <- cbind.data.frame(df.cand,foo)  
+#head(cand)
+
+##check and remove duplicate snps
+length(cand$snp[duplicated(cand$snp)])
+foo <- cbind(cand$axis, duplicated(cand$snp)) 
+table(foo[foo[,1]==1,2]) # no duplicates on axis 1
+table(foo[foo[,1]==2,2]) # 1 duplicates on axis 2
+table(foo[foo[,1]==3,2]) # 6 duplicates on axis 3
+cand <- cand[!duplicated(cand$snp),] # remove duplicate detections
+
+##Chekc predictor candidate is most correlated to
+cols <- as.numeric(ncol(cand))
+for (i in 1:length(cand$snp)) {
+  bar <- cand[i,]
+  cand[i,(cols+1)] <- names(which.max(abs(bar[4:cols]))) # gives the variable
+  cand[i,(cols+2)] <- max(abs(bar[4:cols]))              # gives the correlation
+}
+
+colnames(cand)[cols+1] <- "predictor"
+colnames(cand)[cols+2] <- "correlation"
+
+table(cand$predictor) 
+##bio10 1198 Temperature Seasonality
+##bio13 1189 Mean Temperature of the Warmest Quarter
+##bio15 1029 Precipitation Seasonality
+##tree 1416 tree
+
+
+
+##Write all candidate snps, remove the ones identified as platform
+
+write.table(cand,"results/cawa2.mem.ind.cand.snps.txt",row.names=F,sep = "\t", quote=F)
+
+
+##Plot the snps 
+sel <- cand$snp
+env <- cand$predictor
+env[env=="bio10"] <- '#6b2222' ##dark red
+env[env=="tree"] <- '#286b22' ##green
+env[env=="bio13"] <- '#8fd9d4' ##light red
+env[env=="bio15"] <-  '#00008b'##light blue
+
+
+# color by predictor:
+col.pred <- rownames(cawa2.rda$CCA$v) # pull the SNP names
+
+for (i in 1:length(sel)) {           # color code candidate SNPs
+  foo <- match(sel[i],col.pred)
+  col.pred[foo] <- env[i]
+}
+
+col.pred[grep("scaffold",col.pred)] <- '#f1eef6' # non-candidate SNPs
+empty <- col.pred
+empty[grep("#f1eef6",empty)] <- rgb(0,1,0, alpha=0) # transparent
+empty.outline <- ifelse(empty=="#00FF0000","#00FF0000","gray32")
+bg <- c('#6b2222','#286b22','#e37d7d','#8fd9d4',"#00008b")
+
+
+# axes 1 & 2
+pdf('results/cawa2.mem.ind.rda.plot.cand.snps.RD1.RD2.pdf')
+plot(cawa2.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1))
+#points(cawa2.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3)
+points(cawa2.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3)
+text(cawa2.rda, scaling=3, display="bp", col="#0868ac", cex=1)
+legend("bottomright", legend=c("bio10","tree","bio04","bio15"), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+dev.off()
+
+# axes 1 & 3
+pdf('results/cawa2.mem.ind.plot.cand.snps.RD1.RD3.pdf')
+plot(cawa2.rda, type="n", scaling=3, xlim=c(-1,1), ylim=c(-1,1), choices=c(1,3))
+#points(cawa2.rda, display="species", pch=21, cex=1, col="gray32", bg=col.pred, scaling=3, choices=c(1,3))
+points(cawa2.rda, display="species", pch=21, cex=1, col=empty.outline, bg=empty, scaling=3, choices=c(1,3))
+text(cawa2.rda, scaling=3, display="bp", col="#0868ac", cex=1, choices=c(1,3))
+legend("bottomright", legend=c("bio10","tree","bio04","bio15"), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+dev.off()
+
+##Plot the populations
+row.names(new.gen.imp) <- clim$sample
+pred$clim <- meta$site
+eco <- as.factor(pred$clim)
+
+##Save colors to sites that are close to each other
+##Western blues 
+AB.cols <- brewer.pal(n = 9, name = "Blues")[c(4:6)]
+##Eastern oranges
+MB.col <-brewer.pal(n = 9, name = "Oranges")[2]
+##Eastern oranges
+ME.col <-brewer.pal(n = 9, name = "Oranges")[3]
+##Eastern oranges
+MN.col <-brewer.pal(n = 12, name = "Set3")[4]
+##Eastern oranges
+NB.col<-brewer.pal(n = 11, name = "PuOr")[1]
+##Pink
+NC.col<-brewer.pal(n = 9, name = "Dark2")[4]
+##Eastern oranges
+NH.col <-brewer.pal(n = 9, name = "Oranges")[4]
+##Eastern oranges
+NY.col <-brewer.pal(n = 9, name = "Oranges")[5]
+##Eastern oranges
+ON.col <-brewer.pal(n = 9, name = "Oranges")[5]
+##Southern greens
+PA.cols <- brewer.pal(n = 9, name = "BuGn")[c(6:7)]
+##Eastern oranges
+QC.cols <-brewer.pal(n = 9, name = "Oranges")[c(6,7)]
+##Red
+RI.col<-brewer.pal(n = 11, name = "Set1")[1]
+##Eastern oranges
+WI.col<-brewer.pal(n = 11, name = "RdGy")[3]
+##Southern greens
+WV.col<-brewer.pal(n = 9, name = "BuGn")[4]
+
+
+##Save colors
+bg <- c(AB.cols, MB.col, ME.col, MN.col, NB.col, NC.col, NH.col, NY.col, ON.col, PA.cols, QC.cols, RI.col, WI.col, WV.col)
+
+
+pc.eigenvalues <- eigenvals(cawa2.rda, model="constrained")
+pc.var.expl <- pc.eigenvalues[1:2] / sum(pc.eigenvalues) * 100
+
+
+# axes 1 & 2
+pdf('results/cawa2.mem.ind.rda.plot.RD1.RD2.pdf')
+plot(cawa2.rda, type="n", scaling=3)
+#points(cawa2.rda, display="species", pch=20, cex=0.7, col="gray32", scaling=3)           # the SNPs
+points(cawa2.rda, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[eco]) # the sites
+text(cawa2.rda, scaling=3, display="bp", col="#0868ac", cex=1)                           # the predictors
+legend("bottomright", legend=levels(eco), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+dev.off()  
+
+# axes 3 & 4
+pdf('results/cawa2TEST.mem.ind.rda.plot.RD3.RD4.pdf')
+plot(cawa2.rda, type="n", scaling=3, choices=c(3,4))
+#points(cawa2.rda, display="species", pch=20, cex=0.7, col="gray32", scaling=3)           # the SNPs
+points(cawa2.rda, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[eco]) # the sites
+text(cawa2.rda, scaling=3, display="bp", col="#0868ac", cex=1)                           # the predictors
+legend("bottomright", legend=levels(eco), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+dev.off()  
+
+##Test for lane effects
+##Change factors to be plate combos
+pred$plate <- meta$plate
+eco <- as.factor(pred$platform)
+# axes 1 & 2
+bg <- brewer.pal(n = 8, name = "Set2")[1:7]
+
+pdf('results/cawa2TEST.mem.ind.rda.plot.RD1.RD2.pdf')
+plot(cawa2.rda, type="n", scaling=3)
+#points(cawa2.rda, display="species", pch=20, cex=0.7, col="gray32", scaling=3)           # the SNPs
+points(cawa2.rda, display="sites", pch=21, cex=1.3, col="gray32", scaling=3, bg=bg[eco]) # the sites
+text(cawa2.rda, scaling=3, display="bp", col="#0868ac", cex=1)                           # the predictors
+legend("bottomright", legend=levels(eco), bty="n", col="gray32", pch=21, cex=1, pt.bg=bg)
+dev.off() 
+
+
+```
+
+
+# Using 2nd pass RDA for results. Now I'm going to partition the variance to see what % of variation is attributed to what.
+
+```{r variance partitioning of 2nd pass RDA}
+rm(list=setdiff(ls(), c('new.gen.imp', 'meta','pred')))
+
+##Generating variance partitioning with vegan
+var.part.all <- varpart(new.gen.imp, pred$MEM1, pred[1:4])
+
+# plot the variation partitioning Venn diagram
+plot(var.part.all,
+     Xnames = c("Geography", "Environment"), # name the partitions
+     bg = c("seagreen3", "mediumpurple"), alpha = 80, # colour the circles
+     digits = 2, # only show 2 digits
+     cex = 1)
+
+# ##Started with Rda of environmental variables conditioned on geography
+# #cawa2.rda <- rda(new.gen.imp ~ Condition(MEM1) + tree + bio10 + bio13 + bio15, data=pred, scale=T)
+# # ##Save RDA to file
+# #saveRDS(cawa2.rda, file = "cawa2.mem.ind.rda.rds")
+# ##Read back in RDA
+# cawa2.rda <- readRDS(file = "cawa2.mem.ind.rda.rds")
+# ##find the adjusted rquared value
+# RsquareAdj(cawa2.rda) 
+# ##$r.squared [1] 0.03080925
+# ##$adj.r.squared [1] 0.007345248
+# 
+# ##test against null that env explains no variation
+# signif.full <- anova.cca(cawa2.rda, parallel=getOption("mc.cores")) # default is permutation=999
+# signif.full
+# # Permutation test for rda under reduced model
+# # Permutation: free
+# # Number of permutations: 999
+# # 
+# # Model: rda(formula = new.gen.imp ~ Condition(MEM1) + tree + bio10 + bio13 + bio15, data = pred, scale = T)
+# #           Df Variance      F Pr(>F)    
+# # Model      4    13732 1.3106  0.001 ***
+# # Residual 163   426972                  
+# # ---
+# # Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# ##checking for potential multicollinearity
+# vif.cca(cawa2.rda)
+# 
+# ##Try Rda of geography, no environment
+# cawa.geo.rda <- rda(new.gen.imp ~ MEM1, data=pred, scale=T)
+# # ##Save RDA to file
+# saveRDS(cawa.geo.rda, file = "cawa.geo.rda.rds")
+# ##Read back in RDA
+# cawa.geo.rda <- readRDS(file = "cawa.geo.rda.rds")
+# ##find the adjusted rquared value
+# RsquareAdj(cawa.geo.rda) 
+# #$r.squared [1] 0.01125107
+# #$adj.r.squared [1] 0.005330417
+# ##test against null that env explains no variation
+# signif.full <- anova.cca(cawa.geo.rda, parallel=getOption("mc.cores")) # default is permutation=999
+# signif.full
+# # Permutation test for rda under reduced model
+# # Permutation: free
+# # Number of permutations: 999
+# # 
+# # Model: rda(formula = new.gen.imp ~ MEM1, data = pred, scale = T)
+# #           Df Variance      F Pr(>F)    
+# # Model      1     5015 1.9003  0.001 ***
+# # Residual 167   440704                  
+# # ---
+# # Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# ##checking for potential multicollinearity
+# vif.cca(cawa.geo.rda)
+# 
+# ##Try Rda of geography, conditioned on environment
+# cawa.geo.env.rda <- rda(new.gen.imp ~ MEM1 + Condition(bio10 +bio13+bio15+tree), data=pred, scale=T)
+# # ##Save RDA to file
+# saveRDS(cawa.geo.env.rda, file = "cawa.geo.env.rda.rds")
+# ##Read back in RDA
+# cawa.geo.env.rda <- readRDS(file = "cawa.geo.env.rda.rds")
+# ##find the adjusted rquared value
+# RsquareAdj(cawa.geo.env.rda) 
+# # $r.squared [1] 0.007240714
+# # $adj.r.squared [1] 0.001397047
+# ##test against null that env explains no variation
+# signif.full <- anova.cca(cawa.geo.env.rda, parallel=getOption("mc.cores")) # default is permutation=999
+# signif.full
+# # Permutation test for rda under reduced model
+# # Permutation: free
+# # Number of permutations: 999
+# # 
+# # Model: rda(formula = new.gen.imp ~ MEM1 + Condition(bio10 + bio13 + bio15 + tree), data = pred, scale = T)
+# #           Df Variance      F Pr(>F)    
+# # Model      1     3227 1.2321  0.001 ***
+# # Residual 163   426972                  
+# # ---
+# # Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# ##checking for potential multicollinearity
+# vif.cca(cawa.geo.env.rda)
+# 
+# ##Try Rda of environment only
+# cawa.env.rda <- rda(new.gen.imp ~ bio10+bio13+bio15+tree, data=pred, scale=T)
+# # ##Save RDA to file
+# saveRDS(cawa.env.rda, file = "cawa.env.rda.rds")
+# ##Read back in RDA
+# cawa.env.rda <- readRDS(file = "cawa.env.rda.rds")
+# ##find the adjusted rquared value
+# RsquareAdj(cawa.env.rda) 
+# #$r.squared [1] 0.0348196
+# # $adj.r.squared [1] 0.01127862
+# ##test against null that env explains no variation
+# signif.full <- anova.cca(cawa.env.rda, parallel=getOption("mc.cores")) # default is permutation=999
+# signif.full
+# # Permutation test for rda under reduced model
+# # Permutation: free
+# # Number of permutations: 999
+# # 
+# # Model: rda(formula = new.gen.imp ~ bio10 + bio13 + bio15 + tree, data = pred, scale = T)
+# #           Df Variance      F Pr(>F)    
+# # Model      4    15520 1.4791  0.001 ***
+# # Residual 164   430199                  
+# # ---
+# # Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# ##checking for potential multicollinearity
+# vif.cca(cawa.env.rda)
+# 
+# ##Try Rda of both environment and geography
+# cawa.everything.rda <- rda(new.gen.imp ~ MEM1+ bio10 +bio13+bio15+tree, data=pred, scale=T)
+# # ##Save RDA to file
+# saveRDS(cawa.everything.rda, file = "cawa.everything.rda.rds")
+# ##Read back in RDA
+# cawa.everything.rda <- readRDS(file = "cawa.everything.rda.rds")
+# ##find the adjusted rquared value
+# RsquareAdj(cawa.everything.rda) ##explains 4.5% of variation
+# ##test against null that env explains no variation
+# signif.full <- anova.cca(cawa.everything.rda, parallel=getOption("mc.cores")) # default is permutation=999
+# signif.full
+# # Permutation test for rda under reduced model
+# # Permutation: free
+# # Number of permutations: 999
+# # 
+# # Model: rda(formula = new.gen.imp ~ MEM1 + bio10 + bio13 + bio15 + tree, data = pred, scale = T)
+# #           Df Variance      F Pr(>F)    
+# # Model      5    23140 1.5421  0.001 ***
+# # Residual 163   489190                  
+# # ---
+# # Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# ##checking for potential multicollinearity
+# vif.cca(cawa.everything.rda)
+# 
+# ##Calculations for shared/individual variations
+# 
+# library(VennDiagram)
+# ?draw.pairwise.venn
+# pdf("results/rda.variance.venn.pdf",useDingbats = F)
+# grid.newpage()
+# venn.plot <- draw.pairwise.venn(
+#   area1 = 1.22,##geo only
+#   area2 = 3.75,##env only
+#   cross.area = 0.47, ##shared
+#   #category = c("Geography IBD", "Environment"),
+#   fill = c("purple", "darkgreen"),
+#   lty = "blank",
+#   cex = 2,
+#   cat.cex = 2,
+#   cat.pos = c(285, 105),
+#   cat.dist = 0.09,
+#   cat.just = list(c(-1, -1), c(1, 1)),
+# 
+# )
+# grid.draw(venn.plot)
+# dev.off()
+```
+

@@ -1,0 +1,317 @@
+---
+title: "Genoscape-cawa"
+author: "Caitlin Miller"
+date: "11/23/2022"
+output: html_document
+---
+
+
+```{r setup, include=T}
+#BiocManager::install("SNPRelate")
+#remotes::install_github("eriqande/TESS3_encho_sen")  # for special version of tess3r
+#remotes::install_github("eriqande/genoscapeRtools")  # for Eric's genoscapeRtools
+#install.packages(c("raster", "sf", "tidyverse", "fields", "downloader"))
+library(raster)  # important to load before tidyverse, otherwise it masks select()
+library(tidyverse)
+library(readr)
+library(sf)
+library(ggspatial)
+library(ggplot2)
+library(readxl)
+library(raster)
+library(rgdal)
+library(smoothr)
+library(lwgeom)
+library(rgeos)
+library(readxl)
+```
+
+
+##Make the raster of interpolated Q values
+
+This is using the adaptive admixture values.
+
+```{r reading in and manipulating data}
+
+##read in Q values from admixture
+Q_tibble <- readr::read_table("../admix/adaptInput/cawa.adapt.all.221123.run1.3.Q", col_names = FALSE)
+colnames(Q_tibble) <- c("Southern", "Eastern", "Northwestern")
+
+##read in sample meta data and combine with Q data
+meta <- readxl::read_excel("../cawa_seq_metadata.xlsx")
+Q_tibble$sample <- meta$sample
+info <- left_join(Q_tibble,meta, by="sample")
+
+##make Q value matrix
+q_matrix <- Q_tibble %>%
+  select(-sample) %>%
+  as.matrix()
+
+##make lat/long matrix
+long_lat_tibble <- info %>%
+  select(long, lat)
+
+long_lat_matrix <- long_lat_tibble %>%
+  as.matrix()
+
+##read in the shapefile for the breading range
+breeding_range <- st_read("../../cawa-range-map/map/CAWA.breed_season.sf.WGS84.Ebird.shp")
+##check polygons
+ggplot(breeding_range) +
+  geom_sf() +
+  theme_bw()
+
+rm(list=ls()[!ls() %in%c("breeding_range", "long_lat_matrix", "q_matrix", "info")])
+```
+
+#Interpolate the Q values across the range
+
+After reading in lat/long and Q values for sequencing samples, I will interpolate the rest of the range by using krieging.
+
+```{r interpolating and krieging across the breeding range}
+
+#assign colors to areas
+cluster_colors <-  c(
+  Southern = "#ff4a6a", ##pink
+  Northwestern = "#229047", ##green
+  Eastern = "#2637D4" ##blue-purple
+)
+
+genoscape_brick <- tess3r::tess3Q_map_rasters(
+  x = q_matrix,
+  coord = long_lat_matrix,
+  map.polygon = breeding_range,
+  window = extent(breeding_range)[1:4],
+  resolution = c(300,300), # if you want more cells in your raster, set higher
+  # this next lines need to to be here, but don't do much...
+  col.palette = tess3r::CreatePalette(cluster_colors, length(cluster_colors)),
+  method = "map.max",
+  interpol = tess3r::FieldsKrigModel(10),
+  main = "Ancestry coefficients",
+  xlab = "Longitude",
+  ylab = "Latitude",
+  cex = .4
+)
+# after that, we need to add names of the clusters back onto this raster brick
+names(genoscape_brick) <- c("Southern" , "Eastern","Northwestern")
+
+##edit the raster into a nicer format, where there are probabilities of population across space
+##alpha values now correspond to probabilities- opaque is high prob
+genoscape_rgba <- genoscapeRtools::qprob_rando_raster(
+  TRB = genoscape_brick,
+  cols = cluster_colors,
+  alpha_scale = 2.0,
+  abs_thresh = 0.0,
+  alpha_exp = 1.55,
+  alpha_chop_max = 230
+)
+
+# at this point, we must be explicit about adding a projection to the raster.
+# This adds the info for a regular lat-long projection
+crs(genoscape_rgba) <- "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+
+```
+
+```{r writing raster brick and saving separate shapefiles}
+writeRaster(genoscape_brick,file="brick/cawa.genoscape",bylayer=T,format="GTiff",suffix="numbers", overwrite=T)
+
+files<-list.files(".", pattern='cawa.genoscape_', recursive=T)
+
+nodelist=list()
+for (file in files) {
+c1=raster(file)
+c1c=cut(c1,breaks=c(-Inf,0.5,Inf))
+c1p=rasterToPolygons(c1c,function(j){j==2},dissolve=TRUE)
+proj4string(c1p)=CRS("+proj=longlat +datum=WGS84")
+c1p=st_as_sf(c1p)
+c1pd=drop_crumbs(c1p,threshold=units::set_units(1000, km^2))
+c1pe=fill_holes(c1pd,threshold=units::set_units(1000, km^2))
+c1smooth=smooth(c1pe,method="ksmooth",smoothness=3)
+c1smooth=as(c1smooth,'Spatial')
+nodelist[[file]]=c1smooth
+}
+
+#allow overlap:
+node1<-nodelist[[1]]
+node2<-nodelist[[2]]
+node3<-nodelist[[3]]
+
+
+##Remove overlaps
+node1a=nodelist[[1]]-nodelist[[2]]
+node1b=node1a-nodelist[[3]]
+
+node2a=nodelist[[2]]-nodelist[[1]]
+node2b=node2a-nodelist[[3]]
+
+node3a=nodelist[[3]]-nodelist[[1]]
+node3b=node3a-nodelist[[2]]
+
+#Write out shapefiles for each. Before this, you might need to add the projection (somehow is lost)-- you can see below I read in the shapefile and added it, but if you can do before writing out below, you'd be better off! 
+
+#If have 3 nodes and allow overlap
+writeOGR(node1, dsn="brick/",layer = paste0(substr(files[[1]],1,22),".5ovlp",sep=""), driver = "ESRI Shapefile")
+writeOGR(node2, dsn="brick/",layer = paste0(substr(files[[2]],1,22),".5ovlp",sep=""), driver = "ESRI Shapefile")
+writeOGR(node3, dsn="brick/",layer = paste0(substr(files[[3]],1,22),".5ovlp",sep=""), driver = "ESRI Shapefile")
+
+##If have 3 nodes and do not allow overlap
+writeOGR(node1b, dsn="brick/",layer = paste0(substr(files[[1]],1,22),".5no_ovlp",sep=""), driver = "ESRI Shapefile")
+writeOGR(node2b, dsn="brick/",layer = paste0(substr(files[[2]],1,22),".5no_ovlp",sep=""), driver = "ESRI Shapefile")
+writeOGR(node3b, dsn="brick/",layer = paste0(substr(files[[3]],1,22),".5no_ovlp",sep=""), driver = "ESRI Shapefile")
+
+brick1 <- st_read("brick/brick_cawa.genoscape_1.5no_ovlp.shp") %>% st_set_crs(4326) %>% st_transform(crs=4326)
+brick2 <- st_read("brick/brick_cawa.genoscape_2.5no_ovlp.shp") %>% st_set_crs(4326) %>% st_transform(crs=4326)
+brick3 <- st_read("brick/brick_cawa.genoscape_3.5no_ovlp.shp") %>% st_set_crs(4326) %>% st_transform(crs=4326)
+
+#old bricks
+brick1 <- st_read("../gradFor/au-shapes/CAWA.genoscape_brick_South.5no_ovlp2.shp") %>% st_set_crs(4326) %>% st_transform(crs=4326)
+brick2 <- st_read("../gradFor/au-shapes/CAWA.genoscape_brick_Cen.5no_ovlp2.shp") %>% st_set_crs(4326) %>% st_transform(crs=4326)
+brick3 <- st_read("../gradFor/au-shapes/CAWA.genoscape_brick_NW.5no_ovlp2.shp") %>% st_set_crs(4326) %>% st_transform(crs=4326)
+pdf("brick/old.bricks.cawa.breeding_polygons.5.no_overlap.pdf")
+ggplot() +
+  geom_sf(data = brick1, fill = "green4", color = "green4") +
+  geom_sf(data = brick2, fill = "blue", color = "blue") +
+  geom_sf(data = brick3, fill = "red", color = "red") +
+  theme_bw()
+dev.off()
+
+
+```
+#Getting prettier maps
+
+Now that the genoscape brick is formed, I can make some pretty maps.
+
+```{r making genoscape maps}
+##Adding sampling locations
+ggplot() +
+  layer_spatial(genoscape_rgba) +
+  geom_spatial_point(
+    data = info, 
+    mapping = aes(x = long, y = lat), size = 1
+  ) +
+  theme_bw() +
+  coord_sf()
+
+
+##extent of breeding range
+domain <- c(
+  xmin = -140,
+  xmax = -50,
+  ymin = 0,
+  ymax = 75
+)
+
+##Get coastlines
+coast_cropped <- st_read("../../cawa-range-map/ne_shapefiles/ne_10m_coastline.shp") %>% st_crop(domain)
+##Get countries
+countries_cropped <-  st_read("../../cawa-range-map/ne_shapefiles/ne_10m_admin_0_boundary_lines_land.shp") %>% st_crop(domain)
+##Get states and provinces
+states_cropped <- st_read("../../cawa-range-map/ne_shapefiles/ne_10m_admin_1_states_provinces_lines.shp") %>% st_crop(domain)
+##Get lakes
+lakes <- st_read("../../cawa-range-map/ne_shapefiles/ne_10m_lakes.shp")
+
+
+
+mapg <- ggplot() +
+  geom_sf(data = coast_cropped, fill = NA) +
+  geom_sf(data = countries_cropped, fill = NA) +
+  geom_sf(data = lakes, fill = NA) +
+  ggspatial::layer_spatial(genoscape_rgba) +
+  theme_bw()
+
+# now plot it under default lat-long projection
+mapg + coord_sf()
+
+```
+
+
+#Making a terrain background projection and rectangular map
+
+Adding terrain because it is nice to have and using a slightly less distorted looking coordinate system
+
+```{r terrrain maps}
+##add the terrain background and project
+
+##projection change
+lamproj <- "+proj=lcc +lat_1=20 +lat_2=60 +lat_0=40 +lon_0=-100 +x_0=0 +y_0=0 +ellps=GRS80 +datum=NAD83 +units=m +no_defs"
+
+##extent of breeding range, plus a little extra for cushion
+domain <- c(
+  xmin = -140,
+  xmax = -50,
+  ymin = 25,
+  ymax = 65
+)
+##load in pretty terrain map
+hypso_cropped <- brick("geospatial/HYP_HR_SR_OB_DR/HYP_HR_SR_OB_DR.tif") %>% crop(extent(domain))
+
+big_one <- ggplot() +
+  ggspatial::layer_spatial(hypso_cropped) +
+  geom_sf(data = countries_cropped, fill = NA, size = 0.15) +
+  geom_sf(data = states_cropped, fill = NA, size = 0.1) +
+  ggspatial::layer_spatial(genoscape_rgba) +
+  theme_bw() +
+  coord_sf(crs = st_crs(lamproj))
+
+svg(file="output/large_geno.svg")
+big_one
+dev.off()
+# Here are lat longs for trectangle limits
+pts <- tribble(
+  ~place, ~long, ~lat,
+  "Atlanta", -84.4230019, 33.7489905,
+  "WQC", -59.2808027, 47.59458,
+  "Tungsten",  -128.3029719, 61.9496199
+)
+
+# here we turn that into an sf object
+pts_sf <- st_as_sf(pts, coords = c("long", "lat"),
+                   crs = 4326)  # 4326 is shorthand for "+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"
+
+# and now we transform it to lambert
+pts_lambert <- st_transform(pts_sf, crs = lamproj)
+##print and choose outermost x/y
+st_as_text(pts_lambert$geometry)
+
+rectangled <- ggplot() +
+  ggspatial::layer_spatial(hypso_cropped) +
+  geom_sf(data = countries_cropped, fill = NA, size = 0.15) +
+  geom_sf(data = states_cropped, fill = NA, size = 0.1) +
+  ggspatial::layer_spatial(genoscape_rgba) +
+  theme_bw() +
+  coord_sf(
+    crs = st_crs(lamproj),
+    xlim = c(-1481929, 2791740),
+    ylim = c(-531897.9, 2591308),
+    expand = FALSE)  # expand = FALSE means put the axes right at the xlim and ylim
+svg("output/rectangle_geno.svg")
+rectangled
+dev.off()
+```
+
+# Cropping and simplifying map background
+
+```{r interpolating and krieging across the breeding range for adaptive}
+rm(list=ls()[!ls() %in%c("genoscape_rgba", "breeding_range")])
+
+us <- ggplot2::map_data(map = "usa")
+can <- ggplot2::map_data(map = "world", region = "canada")
+big_one <- ggplot() +
+  #ggspatial::layer_spatial(hypso_cropped) +
+  geom_polygon(data = us, aes(x = long, y = lat, group = group), fill = NA, color = "gray") +
+    geom_polygon(data = can, aes(x = long, y = lat, group = group), fill = NA, color = "gray") +
+  ggspatial::layer_spatial(genoscape_rgba) +
+  geom_sf(data=breeding_range, fill=NA, color = "black") +
+  theme_bw() +
+  coord_sf(xlim = c(-128, -55), ylim = c(30, 61), expand = FALSE, crs=4326)
+
+svg(file="output/large_adapt_geno_bw.svg")
+big_one
+dev.off()
+pdf(file="output/large_adapt_geno_bw.pdf")
+big_one
+dev.off()
+
+```
+
