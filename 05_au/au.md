@@ -25,6 +25,15 @@ R packages:
   smoothr
   lwgeom
   rgeos 
+  vegan
+  lfmm
+  qvalue
+  adegenet
+  data.table
+  reshape2
+  codep
+  adespatial
+  adegraphics
 ```
 
 These steps go from the post-filtering vcf to putatively adaptive loci. I used the putatively adaptive loci to look for adaptive structure and then visualize the structure across the CAWA breeding range. 
