@@ -1,0 +1,53 @@
+# CAWA breeding dataset
+---
+
+This dataset contains vcfs of unfiltered and filtered SNPs associated with individuals sequenced for the project titled ''
+
+## Description of the data and file structure
+
+CAWA data key
+
+1. cawa.bqsr.sort.unfiltered.vcf.gz 
+No filterering, but has been recalibrated using BQSR.
+
+2. cawa.bqsr.miss0.2.qual30.1X.filtered.vcf.gz
+Filtered to allow only 20% missing data, variants must be at least qual30, no indels, and no samples less than 1X coverage.
+
+3. cawa.bqsr.miss0.2.qual30.1X.fst85.imputeAll.imputed.gl.noIndel.noRdaPlatform.vcf.gz
+Filtered to allow only 20% missing data, variants must be at least qual30, no indels, and no samples less than 1X coverage. Secondary fitlering to remove platform effects based on 85th FST percentile and redundancy analysis, then imputed with genotype likelihoods.
+
+4. adapt.cawa.bqsr.miss0.2.qual30.1X.fst85.imputeAll.imputed.gl.noIndel.noRdaPlatform.vcf.gz
+Adaptive SNPs identified from LFMM and RDA only. Filtered from cawa.bqsr.miss0.2.qual30.1X.fst85.imputeAll.imputed.gl.noIndel.noRdaPlatform.vcf.gz
+
+5. cawa_seq_metadata.xlsx
+Metadata for individuals in dataset. Data header is as follows
+      sample - sample ID
+      state - state of collection
+      town - nearest town to collection
+      site - state.town used to differentiate sites in the same states 
+      sex - sex of individual
+      type - sample type, f for feather, b for blood
+      lat - latitude of collection location
+      long - longitude of collection location
+      month - month of collectin
+      date - date of collection 
+      breed - estimate of breeding 
+      cov - average coverage of sample
+      plate - sequencing plate ID
+      merged - was the bam merged across multiple sequencing runs 
+      year - year of collection
+      platform - sequencing platform type
+      group - estimated region membership from isotope analysis
+
+6. indEnv.xlsx
+Environmental data extracted from BIOCLIM variables, tree cover, human influence index, and elevation. Data is extracted at individual sample latitude and longitude. 
+
+## Sharing/Access information
+
+Canada Warbler genome 
+
+  * https://www.ncbi.nlm.nih.gov/bioproject/689308
+
+## Code/Software
+
+All code for genomic analyses can be found at: https://github.com/mcaitlinv/cawa-breeding
